@@ -1,0 +1,53 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build release APK
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Report compile errors
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|FAILURE|Could not" build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk TrumpTrade.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TrumpTrade-apk
+          path: TrumpTrade.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: 川普財經雷達 v1.0.${{ github.run_number }}
+          body: 手機直接下載 TrumpTrade.apk 安裝即可（新版可直接覆蓋安裝，資料保留）。
+          files: TrumpTrade.apk
+          make_latest: true
