@@ -48,6 +48,6 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: 川普財經雷達 v1.0.${{ github.run_number }}
-          body: 手機直接下載 TrumpTrade.apk 安裝即可（新版可直接覆蓋安裝，資料保留）。
+          body: ${{ github.event.head_commit.message || '更新內容請見 commit 紀錄' }}
           files: TrumpTrade.apk
           make_latest: true

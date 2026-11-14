@@ -83,6 +83,7 @@ object Notifier {
 class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val store = Store(applicationContext)
+        checkUpdate(store)
         if (!store.notifyOn) return Result.success()
         val res = try {
             Repo.fetch(Sources.alertSources, "")
@@ -129,5 +130,20 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             Notifier.show(applicationContext, item.id.hashCode(), title, text)
         }
         return Result.success()
+    }
+
+    /** 每 6 小時檢查一次新版，有新版就通知 */
+    private fun checkUpdate(store: Store) {
+        val sp = applicationContext.getSharedPreferences("tt", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - sp.getLong("upd_check", 0L) < 6 * 3600_000L) return
+        sp.edit().putLong("upd_check", now).apply()
+        try {
+            val info = Updater.check(applicationContext) ?: return
+            if (sp.getInt("upd_notified", 0) >= info.version) return
+            sp.edit().putInt("upd_notified", info.version).apply()
+            Notifier.show(applicationContext, 9999, "📲 川普財經雷達有新版本 ${info.name}", "點我打開 App，按「立即更新」即可完成更新。")
+        } catch (_: Exception) {
+        }
     }
 }

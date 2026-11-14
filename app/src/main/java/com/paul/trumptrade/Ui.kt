@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -157,6 +158,33 @@ fun AppRoot(vm: MainViewModel) {
         else settings = false
     }
     BackHandler(enabled = inSub) { goBack() }
+
+    val up = s.update
+    if (up != null && !s.updateDismissed) {
+        AlertDialog(
+            onDismissRequest = { if (s.updateProgress < 0) vm.dismissUpdate() },
+            title = { Text("發現新版本 ${up.name}") },
+            text = {
+                Column {
+                    if (up.notes.isNotBlank()) Text(up.notes.take(600), fontSize = 13.sp)
+                    if (s.updateProgress >= 0) {
+                        Spacer(Modifier.height(10.dp))
+                        LinearProgressIndicator(progress = { s.updateProgress / 100f }, modifier = Modifier.fillMaxWidth())
+                        Text("下載中 ${s.updateProgress}%", fontSize = 12.sp, color = Neutral)
+                    } else {
+                        Spacer(Modifier.height(6.dp))
+                        Text("按「立即更新」下載後，系統會跳出安裝畫面，按「更新」即可。設定與紀錄都會保留。", fontSize = 12.sp, color = Neutral)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { vm.startUpdate() }, enabled = s.updateProgress < 0) { Text("立即更新") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.dismissUpdate() }, enabled = s.updateProgress < 0) { Text("稍後") }
+            }
+        )
+    }
 
     val title = when {
         settings -> "設定"
@@ -779,6 +807,14 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
             )
             TextButton(onClick = { runCatching { uri.openUri("https://api.congress.gov/sign-up/") } }) { Text("免費申請 Congress.gov Key →") }
             Text("不填也可以，政策分頁仍會顯示白宮行政命令、商務部/USTR 公告與國會法案新聞。", fontSize = 12.sp, color = Neutral)
+        }
+        item {
+            HorizontalDivider()
+            SectionTitle("📲 App 版本")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("目前版本 v${Updater.currentName(ctx)}", Modifier.weight(1f))
+                OutlinedButton(onClick = { vm.checkUpdate(true) }) { Text("檢查更新") }
+            }
         }
         item {
             Button(
