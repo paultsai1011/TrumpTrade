@@ -81,6 +81,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@Composable
+fun AiProgress(s: UiState) {
+    if (s.aiStatus.isBlank()) return
+    var sec by remember { mutableIntStateOf(0) }
+    LaunchedEffect(s.aiStart) {
+        while (true) {
+            sec = ((System.currentTimeMillis() - s.aiStart) / 1000).toInt()
+            kotlinx.coroutines.delay(500)
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text("${s.aiStatus}… 已 ${sec} 秒", fontSize = 12.sp, color = Neutral, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
 // 台灣習慣：漲紅跌綠
 val UpRed = Color(0xFFEF5350)
 val DownGreen = Color(0xFF26A69A)
@@ -381,6 +397,7 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
                 if (s.briefLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Button(onClick = { vm.makeBrief() }) { Text(if (b == null) "產生" else "更新") }
             }
+            if (s.briefLoading) AiProgress(s)
             if (b == null) {
                 Text("按「產生」讓 AI 讀完最近的川普發言、政策與美股新聞，整理出台股可能的買進／賣出名單。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 return@Column
@@ -438,6 +455,7 @@ fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onOpen: (NewsItem) -> Unit
                     Text(if (s.batchRunning) "分析中…" else "AI 分析前5則")
                 }
             }
+            if (s.batchRunning) AiProgress(s)
             Text("共 ${shown.size} 則", fontSize = 11.sp, color = Neutral)
         }
         if (shown.isEmpty()) item {
@@ -470,10 +488,7 @@ fun DetailScreen(vm: MainViewModel, s: UiState, news: NewsItem, onStock: (String
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { vm.analyze(news) }, enabled = !busy) { Text(if (a == null) "🤖 AI 分析影響" else "重新分析") }
             }
-            if (busy) {
-                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-                Text("AI 分析中，約 5~20 秒…", fontSize = 12.sp, color = Neutral)
-            }
+            if (busy) AiProgress(s)
         }
         if (news.themes.isNotEmpty()) item {
             SectionTitle("關鍵字比對到的題材")
@@ -642,10 +657,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { runCatching { uri.openUri("https://tw.stock.yahoo.com/quote/$code") } }) { Text("Yahoo股市") }
             }
-            if (busy) {
-                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-                Text("AI 正在讀相關新聞並分析…", fontSize = 12.sp, color = Neutral)
-            }
+            if (busy) AiProgress(s)
         }
         if (sa != null) item {
             Card {

@@ -55,11 +55,28 @@ object Gemini {
         return if (chosen.isNotBlank() && chosen != "auto") listOf(chosen) + ranked.filter { it != chosen } else ranked
     }
 
-    private fun generate(key: String, model: String, prompt: String): String {
+    /** 關閉/降低「深度思考」，回應速度可快 3~10 倍 */
+    private fun thinkingConfig(model: String): JSONObject? = when {
+        model.contains("2.5") && !model.contains("pro") -> JSONObject().put("thinkingBudget", 0)
+        ver(model) >= 3.0 || model.contains("latest") -> JSONObject().put("thinkingLevel", "low")
+        else -> null
+    }
+
+    private fun generate(key: String, model: String, prompt: String, useThinkingCfg: Boolean = true): String {
+        val gc = JSONObject().put("temperature", 0.4).put("responseMimeType", "application/json")
+        val tc = if (useThinkingCfg) thinkingConfig(model) else null
+        if (tc != null) gc.put("thinkingConfig", tc)
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-            .put("generationConfig", JSONObject().put("temperature", 0.4).put("responseMimeType", "application/json"))
-        val resp = JSONObject(Net.post("$BASE/models/$model:generateContent", body.toString(), mapOf("x-goog-api-key" to key)))
+            .put("generationConfig", gc)
+        val raw = try {
+            Net.post("$BASE/models/$model:generateContent", body.toString(), mapOf("x-goog-api-key" to key), timeout = 45000)
+        } catch (e: HttpException) {
+            // 舊模型不支援 thinkingConfig → 拿掉再試一次
+            if (tc != null && e.code == 400 && e.body.contains("think", true)) return generate(key, model, prompt, false)
+            throw e
+        }
+        val resp = JSONObject(raw)
         val cands = resp.optJSONArray("candidates")
         if (cands == null || cands.length() == 0) throw IllegalStateException("AI 沒有回應")
         val parts = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
@@ -80,11 +97,16 @@ object Gemini {
         return JSONObject(s.substring(a, b + 1))
     }
 
-    fun ask(store: Store, prompt: String): JSONObject {
+    fun ask(store: Store, prompt: String, onStatus: (String) -> Unit = {}): JSONObject {
         val key = store.geminiKey
         if (key.isBlank()) throw IllegalStateException("請先到「設定」輸入 Gemini API Key")
         var last: Exception? = null
-        for (m in candidates(store).take(4)) {
+        var list = candidates(store)
+        // 上次成功的模型優先，省掉失敗重試的時間
+        val ok = store.lastModel
+        if (store.model == "auto" && ok.isNotBlank() && ok in list) list = listOf(ok) + list.filter { it != ok }
+        for ((i, m) in list.take(3).withIndex()) {
+            onStatus(if (i == 0) "AI 分析中（$m）" else "換模型重試（$m）")
             try {
                 val o = extractJson(generate(key, m, prompt))
                 store.lastModel = m
@@ -99,6 +121,7 @@ object Gemini {
         }
         val msg = when {
             last is HttpException && (last as HttpException).code == 429 -> "免費額度暫時用完(429)，請稍後再試"
+            last is java.net.SocketTimeoutException -> "AI 回應逾時，請再試一次"
             else -> last?.message ?: "未知錯誤"
         }
         throw IllegalStateException("AI 分析失敗：$msg")

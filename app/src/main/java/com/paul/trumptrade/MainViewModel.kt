@@ -30,6 +30,8 @@ data class UiState(
     val watchlist: List<String> = emptyList(),
     val models: List<String> = emptyList(),
     val message: String? = null,
+    val aiStatus: String = "",
+    val aiStart: Long = 0L,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -53,6 +55,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun upd(f: (UiState) -> UiState) = _s.update(f)
     fun toast(m: String) = upd { it.copy(message = m) }
     fun clearMessage() = upd { it.copy(message = null) }
+
+    private fun aiBegin() = upd { it.copy(aiStatus = "AI 準備中…", aiStart = System.currentTimeMillis()) }
+    private val onAi: (String) -> Unit = { msg -> upd { it.copy(aiStatus = msg) } }
+    private fun aiEnd() = upd { it.copy(aiStatus = "", aiStart = 0L) }
 
     fun nameOf(code: String): String =
         _s.value.quotes[code]?.name?.takeIf { it.isNotBlank() }
@@ -91,6 +97,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         codes.addAll(s.watchlist)
         s.brief?.let { b -> (b.buy + b.sell + b.watch).forEach { codes.add(it.code) } }
         s.analyses.values.sortedByDescending { it.time }.take(30).forEach { a -> a.stocks.forEach { codes.add(it.code) } }
+        val cutoff = System.currentTimeMillis() - 24 * 3600_000L
+        s.items.filter { it.time > cutoff }.flatMap { it.themes }.groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }.take(8)
+            .forEach { e -> StockMap.theme(e.key)?.stocks?.forEach { codes.add(it.first) } }
         if (codes.isEmpty()) return
         viewModelScope.launch {
             val q = withContext(Dispatchers.IO) { TwQuote.fetch(codes.take(100)) }
@@ -101,8 +111,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- AI：單則新聞 ----------
     private suspend fun analyzeNow(item: NewsItem): Analysis? {
         upd { it.copy(analyzing = it.analyzing + item.id) }
+        aiBegin()
         return try {
-            val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.news(item)) }
+            val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.news(item), onAi) }
             o.put("_t", System.currentTimeMillis())
             withContext(Dispatchers.IO) { store.saveAnalysis(item.id, o) }
             val a = parseAnalysis(o)
@@ -113,6 +124,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             upd { it.copy(analyzing = it.analyzing - item.id) }
             toast(e.message ?: "AI 分析失敗")
             null
+        } finally {
+            aiEnd()
         }
     }
 
@@ -141,14 +154,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val s = _s.value
         val cutoff = System.currentTimeMillis() - 36 * 3600_000L
         val recent = s.items.filter { it.time == 0L || it.time > cutoff }
-        val pick = (recent.filter { it.cat == Cat.TRUMP }.take(20) +
-                recent.filter { it.cat == Cat.POLICY }.take(15) +
-                recent.filter { it.cat == Cat.NEWS }.take(30))
+        // 有台股題材的優先，總量控制在 40 則以內，AI 回得比較快
+        fun top(c: Cat, n: Int) = recent.filter { it.cat == c }.sortedByDescending { if (it.themes.isNotEmpty()) 1 else 0 }.take(n)
+        val pick = top(Cat.TRUMP, 12) + top(Cat.POLICY, 10) + top(Cat.NEWS, 18)
         if (pick.isEmpty()) { toast("還沒有新聞資料，請先重新整理"); return }
         upd { it.copy(briefLoading = true) }
+        aiBegin()
         viewModelScope.launch {
             try {
-                val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.brief(pick, s.markets)) }
+                val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.brief(pick, s.markets), onAi) }
                 o.put("_t", System.currentTimeMillis())
                 withContext(Dispatchers.IO) { store.saveBrief(o) }
                 val b = parseBrief(o)
@@ -157,6 +171,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 upd { it.copy(briefLoading = false) }
                 toast(e.message ?: "AI 總結失敗")
+            } finally {
+                aiEnd()
             }
         }
     }
@@ -179,6 +195,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun analyzeStockNow(code: String): Boolean {
         upd { it.copy(stockAnalyzing = it.stockAnalyzing + code) }
+        aiBegin()
         return try {
             var q = _s.value.quotes[code]
             if (q == null) {
@@ -194,7 +211,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val themes = StockMap.themesOfStock(code).map { it.name }
             val prompt = Prompts.stock(code, name, q, themes, relatedUsNews(code), tw)
-            val o = withContext(Dispatchers.IO) { Gemini.ask(store, prompt) }
+            val o = withContext(Dispatchers.IO) { Gemini.ask(store, prompt, onAi) }
             o.put("_t", System.currentTimeMillis()).put("_code", code).put("_name", name)
             withContext(Dispatchers.IO) { store.saveStockAnalysis(code, o) }
             val sa = parseStockAnalysis(o)
@@ -204,6 +221,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             upd { it.copy(stockAnalyzing = it.stockAnalyzing - code) }
             toast(e.message ?: "AI 分析失敗")
             false
+        } finally {
+            aiEnd()
         }
     }
 
