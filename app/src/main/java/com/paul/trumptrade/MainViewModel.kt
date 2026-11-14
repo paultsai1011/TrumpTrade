@@ -34,7 +34,6 @@ data class UiState(
     val aiStart: Long = 0L,
     val update: Updater.Info? = null,
     val updateDismissed: Boolean = false,
-    val updateProgress: Int = -1,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -68,34 +67,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissUpdate() = upd { it.copy(updateDismissed = true) }
 
     fun startUpdate() {
-        val info = _s.value.update ?: return
-        if (_s.value.updateProgress >= 0) return
-        val ctx = getApplication<Application>()
-        val ready = Updater.downloaded(ctx, info)
-        if (ready != null) { installOrAsk(ready); return }
-        upd { it.copy(updateProgress = 0) }
-        viewModelScope.launch {
-            try {
-                val f = withContext(Dispatchers.IO) {
-                    Updater.download(ctx, info) { p -> upd { it.copy(updateProgress = p) } }
-                }
-                upd { it.copy(updateProgress = -1) }
-                installOrAsk(f)
-            } catch (e: Exception) {
-                upd { it.copy(updateProgress = -1) }
-                toast("下載更新失敗：${e.message}")
-            }
-        }
-    }
-
-    private fun installOrAsk(f: java.io.File) {
-        val ctx = getApplication<Application>()
-        if (!Updater.canInstall(ctx)) {
-            toast("請開啟「允許安裝此來源的應用程式」，回來再按一次「立即更新」")
-            Updater.openInstallPermission(ctx)
-            return
-        }
-        try { Updater.install(ctx, f) } catch (e: Exception) { toast("無法開啟安裝畫面：${e.message}") }
+        try { Updater.openDownload(getApplication()) } catch (e: Exception) { toast("無法開啟瀏覽器") }
+        dismissUpdate()
     }
 
     private fun upd(f: (UiState) -> UiState) = _s.update(f)

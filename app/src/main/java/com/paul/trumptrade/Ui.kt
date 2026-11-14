@@ -162,26 +162,20 @@ fun AppRoot(vm: MainViewModel) {
     val up = s.update
     if (up != null && !s.updateDismissed) {
         AlertDialog(
-            onDismissRequest = { if (s.updateProgress < 0) vm.dismissUpdate() },
+            onDismissRequest = { vm.dismissUpdate() },
             title = { Text("發現新版本 ${up.name}") },
             text = {
                 Column {
                     if (up.notes.isNotBlank()) Text(up.notes.take(600), fontSize = 13.sp)
-                    if (s.updateProgress >= 0) {
-                        Spacer(Modifier.height(10.dp))
-                        LinearProgressIndicator(progress = { s.updateProgress / 100f }, modifier = Modifier.fillMaxWidth())
-                        Text("下載中 ${s.updateProgress}%", fontSize = 12.sp, color = Neutral)
-                    } else {
-                        Spacer(Modifier.height(6.dp))
-                        Text("按「立即更新」下載後，系統會跳出安裝畫面，按「更新」即可。設定與紀錄都會保留。", fontSize = 12.sp, color = Neutral)
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("按「立即更新」會用瀏覽器下載新版，下載完點通知列的檔案安裝即可，設定與紀錄都會保留。", fontSize = 12.sp, color = Neutral)
                 }
             },
             confirmButton = {
-                Button(onClick = { vm.startUpdate() }, enabled = s.updateProgress < 0) { Text("立即更新") }
+                Button(onClick = { vm.startUpdate() }) { Text("立即更新") }
             },
             dismissButton = {
-                TextButton(onClick = { vm.dismissUpdate() }, enabled = s.updateProgress < 0) { Text("稍後") }
+                TextButton(onClick = { vm.dismissUpdate() }) { Text("稍後") }
             }
         )
     }
