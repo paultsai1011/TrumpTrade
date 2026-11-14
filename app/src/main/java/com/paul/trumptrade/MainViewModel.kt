@@ -33,6 +33,8 @@ data class UiState(
     val aiStatus: String = "",
     val aiStart: Long = 0L,
     val update: Updater.Info? = null,
+    val translations: Map<String, Translation> = emptyMap(),
+    val translating: Boolean = false,
     val updateDismissed: Boolean = false,
 )
 
@@ -43,6 +45,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         UiState(
             items = store.loadItems(),
             analyses = store.loadAnalyses(),
+            translations = store.loadTranslations(),
             stockAnalyses = store.loadStockAnalyses(),
             brief = store.loadBrief(),
             watchlist = store.watchlist,
@@ -106,6 +109,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (res.items.isEmpty()) toast("讀取失敗，請確認網路連線")
             refreshQuotes()
+            if (store.autoTranslate) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
         }
     }
 
@@ -167,6 +171,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- AI：批次翻譯 + 相關台股 ----------
+    fun translateBatch(items: List<NewsItem>, auto: Boolean = false) {
+        if (_s.value.translating) return
+        if (store.geminiKey.isBlank()) { if (!auto) toast("請先到「設定」輸入 Gemini API Key"); return }
+        val todo = items.filter { it.id !in _s.value.translations }.take(if (auto) 30 else 40)
+        if (todo.isEmpty()) { if (!auto) toast("這頁都翻譯好了"); return }
+        upd { it.copy(translating = true) }
+        aiBegin()
+        viewModelScope.launch {
+            try {
+                val chunks = todo.chunked(10)
+                for ((ci, chunk) in chunks.withIndex()) {
+                    onAi("翻譯中 ${ci * 10 + 1}~${ci * 10 + chunk.size} / ${todo.size} 則")
+                    val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.translate(chunk)) }
+                    val arr = o.optJSONArray("items") ?: continue
+                    val raw = HashMap<String, org.json.JSONObject>()
+                    for (k in 0 until arr.length()) {
+                        val e = arr.optJSONObject(k) ?: continue
+                        val idx = e.n("i", k)
+                        val item = chunk.getOrNull(idx) ?: continue
+                        if (e.s("zh").isBlank()) continue
+                        e.put("_t", System.currentTimeMillis())
+                        raw[item.id] = e
+                    }
+                    withContext(Dispatchers.IO) { store.saveTranslations(raw) }
+                    val parsed = raw.mapValues { parseTranslation(it.value) }
+                    upd { it.copy(translations = it.translations + parsed) }
+                    refreshQuotes(parsed.values.flatMap { t -> t.stocks.map { it.code } })
+                    if (ci < chunks.size - 1) delay(1500)
+                }
+            } catch (e: Exception) {
+                if (!auto) toast(e.message ?: "翻譯失敗") else toast("自動翻譯暫停：${e.message}")
+            } finally {
+                upd { it.copy(translating = false) }
+                aiEnd()
+            }
+        }
+    }
+
     // ---------- AI：每日總結 ----------
     fun makeBrief() {
         if (_s.value.briefLoading) return
@@ -200,7 +243,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun relatedUsNews(code: String): List<NewsItem> {
         val themes = StockMap.themesOfStock(code).map { it.name }.toSet()
         val s = _s.value
-        val byAi = s.analyses.filter { (_, a) -> a.stocks.any { it.code == code } }.keys
+        val byAi = s.analyses.filter { (_, a) -> a.stocks.any { it.code == code } }.keys +
+                s.translations.filter { (_, t) -> t.stocks.any { it.code == code } }.keys
         return s.items.filter { it.id in byAi || it.themes.any { t -> t in themes } }.take(30)
     }
 
@@ -294,8 +338,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveSettings(
         gemini: String, congress: String, model: String, notifyOn: Boolean, notifyAi: Boolean,
-        interval: Int, keywords: String,
+        interval: Int, keywords: String, autoTr: Boolean,
     ) {
+        store.autoTranslate = autoTr
         val keyChanged = gemini.trim() != store.geminiKey
         store.geminiKey = gemini
         store.congressKey = congress
@@ -307,5 +352,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (keyChanged) { store.modelCache = ""; store.modelCacheTime = 0L }
         App.schedule(getApplication())
         toast("已儲存")
+        if (autoTr && store.geminiKey.isNotBlank()) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
     }
 }

@@ -42,6 +42,9 @@ class Store(ctx: Context) {
     var alertKeywords: String
         get() = str("alert_kw", DEFAULT_KW)
         set(v) = put("alert_kw", v)
+    var autoTranslate: Boolean
+        get() = sp.getBoolean("auto_tr", true)
+        set(v) = sp.edit().putBoolean("auto_tr", v).apply()
     var watchlist: List<String>
         get() = str("watch", StockMap.defaultWatch.joinToString(",")).split(",").map { it.trim() }.filter { it.isNotBlank() }
         set(v) = put("watch", v.distinct().joinToString(","))
@@ -122,6 +125,25 @@ class Store(ctx: Context) {
         val m = synchronized(LOCK) { loadMap("stocks.json") }
         val out = HashMap<String, StockAnalysis>()
         m.keys().forEach { k -> m.optJSONObject(k)?.let { runCatching { out[k] = parseStockAnalysis(it) } } }
+        return out
+    }
+
+    fun saveTranslations(items: Map<String, JSONObject>) {
+        synchronized(LOCK) {
+            val m = loadMap("trans.json")
+            items.forEach { (k, v) -> m.put(k, v) }
+            if (m.length() > 800) {
+                val keys = m.keys().asSequence().toList().sortedBy { m.optJSONObject(it)?.optLong("_t") ?: 0L }
+                keys.take(m.length() - 800).forEach { m.remove(it) }
+            }
+            writeFile("trans.json", m.toString())
+        }
+    }
+
+    fun loadTranslations(): Map<String, Translation> {
+        val m = synchronized(LOCK) { loadMap("trans.json") }
+        val out = HashMap<String, Translation>()
+        m.keys().forEach { k -> m.optJSONObject(k)?.let { runCatching { out[k] = parseTranslation(it) } } }
         return out
     }
 

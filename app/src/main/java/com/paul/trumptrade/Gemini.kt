@@ -158,6 +158,27 @@ stocks 列出 2~6 檔最直接受影響的台股。$STOCK_RULE 若內容與市�
 """.trimIndent()
     }
 
+    fun translate(items: List<NewsItem>): String {
+        val list = items.withIndex().joinToString("\n\n") { (i, it) ->
+            val text = (if (it.body.length > it.title.length) it.body else it.title).take(1500)
+            val hint = if (it.themes.isNotEmpty()) " 題材提示：" + it.themes.joinToString("、") else ""
+            "[$i]（${it.source}，${fmt(it.time)}）$hint\n$text"
+        }
+        return """
+你是專業財經翻譯兼台股分析師。請把下面每一則川普發言／美國消息翻譯成通順的繁體中文（台灣用語；常見名稱用台灣譯名，例如 Nvidia→輝達、Fed→聯準會），並判斷可能有關的台股。
+規則：
+- zh：完整翻出原文意思，不要省略或加油添醋；如果只是連結、影片、轉貼或沒有實質內容，寫「（影片／連結貼文）」再簡述。
+- stocks：0~4 檔最直接相關的台股，action 只能是「利多」或「利空」，reason 10~20 字說明關聯。跟台股沒關係就給空陣列，不要硬湊。
+- importance：1~5，對市場的影響程度（一般政治口水給 1）。
+- sentiment：對台股整體「利多／利空／中性」。
+$STOCK_RULE
+只輸出 JSON：{"items":[{"i":0,"zh":"","importance":1,"sentiment":"中性","stocks":[{"code":"2330","name":"台積電","action":"利多","reason":""}]}]}
+每一則都要有，i 對應編號。
+
+$list
+""".trimIndent()
+    }
+
     fun brief(items: List<NewsItem>, markets: List<MarketQuote>): String {
         val lines = items.joinToString("\n") { "[${it.cat.label}][${it.source}][${fmt(it.time)}] ${it.title.take(200)}" }
         val mk = markets.joinToString("；") { "${it.label} ${"%.2f".format(it.price)} (${"%+.2f".format(it.pct)}%)" }.ifBlank { "（無資料）" }

@@ -36,6 +36,14 @@ data class Analysis(
     val time: Long,
 )
 
+data class Translation(
+    val zh: String,
+    val importance: Int,
+    val sentiment: String,
+    val stocks: List<StockPick>,
+    val time: Long,
+)
+
 data class Quote(val code: String, val name: String, val price: Double, val prev: Double, val time: String) {
     val change: Double get() = if (price > 0 && prev > 0) price - prev else 0.0
     val pct: Double get() = if (price > 0 && prev > 0) (price - prev) / prev * 100 else 0.0
@@ -165,5 +173,13 @@ fun parseStockAnalysis(o: JSONObject): StockAnalysis = StockAnalysis(
     reasons = o.strList("reasons"),
     risks = o.strList("risks"),
     catalysts = o.strList("catalysts"),
+    time = o.optLong("_t", System.currentTimeMillis()),
+)
+
+fun parseTranslation(o: JSONObject): Translation = Translation(
+    zh = o.s("zh"),
+    importance = o.n("importance", 1).coerceIn(1, 5),
+    sentiment = o.s("sentiment", "中性"),
+    stocks = parsePicks(o.optJSONArray("stocks")).map { it.copy(confidence = -1, action = it.action.ifBlank { "相關" }) },
     time = o.optLong("_t", System.currentTimeMillis()),
 )

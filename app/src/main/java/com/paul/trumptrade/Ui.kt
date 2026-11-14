@@ -108,7 +108,7 @@ fun pctColor(p: Double): Color = when {
 }
 
 fun actionColor(a: String): Color = when {
-    a.contains("買") -> UpRed; a.contains("賣") -> DownGreen; else -> Neutral
+    a.contains("買") || a == "利多" -> UpRed; a.contains("賣") || a == "利空" -> DownGreen; else -> Neutral
 }
 
 fun sentimentColor(s: String): Color = when {
@@ -226,9 +226,9 @@ fun AppRoot(vm: MainViewModel) {
                 dt != null -> DetailScreen(vm, s, dt, onStock = { stock = it })
                 else -> when (tab) {
                     0 -> Overview(vm, s, onStock = { stock = it }, onNews = { detail = it }, onSettings = { settings = true })
-                    1 -> FeedList(vm, s, Cat.TRUMP) { detail = it }
-                    2 -> FeedList(vm, s, Cat.NEWS) { detail = it }
-                    3 -> FeedList(vm, s, Cat.POLICY) { detail = it }
+                    1 -> FeedList(vm, s, Cat.TRUMP, onStock = { stock = it }) { detail = it }
+                    2 -> FeedList(vm, s, Cat.NEWS, onStock = { stock = it }) { detail = it }
+                    3 -> FeedList(vm, s, Cat.POLICY, onStock = { stock = it }) { detail = it }
                     else -> StockTab(vm, s) { stock = it }
                 }
             }
@@ -293,14 +293,17 @@ fun PickRow(p: StockPick, q: Quote?, onStock: (String) -> Unit) {
             }
             PriceText(q)
             Spacer(Modifier.width(10.dp))
-            ActionBadge(p.action, p.confidence)
+            ActionBadge(p.action, p.confidence.takeIf { it >= 0 })
         }
         if (p.reason.isNotBlank()) Text(p.reason, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-fun NewsCard(item: NewsItem, a: Analysis?, analyzing: Boolean, onClick: () -> Unit) {
+fun NewsCard(
+    item: NewsItem, a: Analysis?, analyzing: Boolean, t: Translation? = null,
+    onStock: (String) -> Unit = {}, onClick: () -> Unit,
+) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -309,24 +312,43 @@ fun NewsCard(item: NewsItem, a: Analysis?, analyzing: Boolean, onClick: () -> Un
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1
                 )
                 if (analyzing) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                if (a != null) {
-                    Text("★".repeat(a.importance), color = Color(0xFFFFC107), fontSize = 11.sp)
+                val imp = a?.importance ?: t?.importance
+                val sen = a?.sentiment ?: t?.sentiment
+                if (imp != null) {
+                    Text("★".repeat(imp), color = Color(0xFFFFC107), fontSize = 11.sp)
                     Spacer(Modifier.width(6.dp))
-                    Text(a.sentiment, color = sentimentColor(a.sentiment), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
+                if (sen != null) Text(sen, color = sentimentColor(sen), fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(4.dp))
-            Text(item.title, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            if (a != null && a.summary.isNotBlank()) {
+            if (t != null && t.zh.isNotBlank()) {
+                Text(t.zh, style = MaterialTheme.typography.bodyMedium, maxLines = 10, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                Text(item.title, fontSize = 12.sp, color = Neutral, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } else {
+                Text(item.title, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+            if (a != null && a.summary.isNotBlank() && t == null) {
                 Spacer(Modifier.height(4.dp))
                 Text("🤖 " + a.summary, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                if (a.stocks.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    a.stocks.forEach { p ->
-                        Tag("${p.name}${p.code} ${p.action}", actionColor(p.action).copy(alpha = 0.18f), actionColor(p.action))
+            }
+            val picks = (t?.stocks ?: emptyList()).ifEmpty { a?.stocks ?: emptyList() }
+            if (picks.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 2.dp)) {
+                    picks.forEach { p ->
+                        val c = actionColor(p.action)
+                        Surface(
+                            shape = RoundedCornerShape(50), color = c.copy(alpha = 0.18f),
+                            modifier = Modifier.padding(end = 6.dp, top = 4.dp).clickable { onStock(p.code) }
+                        ) {
+                            Text("${p.name} ${p.code} ${p.action}", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), fontSize = 12.sp, color = c)
+                        }
                     }
                 }
-            } else if (item.themes.isNotEmpty()) {
+            } else if (t == null && item.themes.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState())) { item.themes.forEach { Tag(it) } }
+            } else if (t != null) {
+                Text("與台股無直接關聯", fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
@@ -396,10 +418,10 @@ fun Overview(vm: MainViewModel, s: UiState, onStock: (String) -> Unit, onNews: (
         item { SectionTitle("🇺🇸 川普最新動態") }
         val trump = s.items.filter { it.cat == Cat.TRUMP && it.source == "Truth Social" }.take(3)
             .ifEmpty { s.items.filter { it.cat == Cat.TRUMP }.take(3) }
-        items(trump, key = { "o_" + it.id }) { NewsCard(it, s.analyses[it.id], it.id in s.analyzing) { onNews(it) } }
+        items(trump, key = { "o_" + it.id }) { NewsCard(it, s.analyses[it.id], it.id in s.analyzing, s.translations[it.id], onStock) { onNews(it) } }
         item { SectionTitle("📜 最新政策") }
         items(s.items.filter { it.cat == Cat.POLICY }.take(3), key = { "p_" + it.id }) {
-            NewsCard(it, s.analyses[it.id], it.id in s.analyzing) { onNews(it) }
+            NewsCard(it, s.analyses[it.id], it.id in s.analyzing, s.translations[it.id], onStock) { onNews(it) }
         }
         item {
             if (s.lastUpdate > 0) Text("更新時間：${fullTime(s.lastUpdate)}", fontSize = 11.sp, color = Neutral)
@@ -456,13 +478,18 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
 // ---------------- 新聞列表 ----------------
 
 @Composable
-fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onOpen: (NewsItem) -> Unit) {
+fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onStock: (String) -> Unit, onOpen: (NewsItem) -> Unit) {
     var onlyTw by rememberSaveable(cat.name) { mutableStateOf(false) }
     var q by rememberSaveable(cat.name) { mutableStateOf("") }
+    LaunchedEffect(cat, s.items.size) {
+        if (cat == Cat.TRUMP && vm.store.autoTranslate) vm.translateBatch(s.items.filter { it.cat == Cat.TRUMP }, auto = true)
+    }
     val shown = s.items.filter { it.cat == cat }.filter { item ->
-        (!onlyTw || item.themes.isNotEmpty() || (s.analyses[item.id]?.stocks?.isNotEmpty() == true)) &&
+        (!onlyTw || item.themes.isNotEmpty() || (s.analyses[item.id]?.stocks?.isNotEmpty() == true) ||
+                (s.translations[item.id]?.stocks?.isNotEmpty() == true)) &&
                 (q.isBlank() || item.title.contains(q, true) || item.body.contains(q, true) ||
-                        (s.analyses[item.id]?.summary?.contains(q, true) == true))
+                        (s.analyses[item.id]?.summary?.contains(q, true) == true) ||
+                        (s.translations[item.id]?.zh?.contains(q, true) == true))
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -477,14 +504,19 @@ fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onOpen: (NewsItem) -> Unit
                     Text(if (s.batchRunning) "分析中…" else "AI 分析前5則")
                 }
             }
-            if (s.batchRunning) AiProgress(s)
-            Text("共 ${shown.size} 則", fontSize = 11.sp, color = Neutral)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                OutlinedButton(onClick = { vm.translateBatch(shown) }, enabled = !s.translating) {
+                    Text(if (s.translating) "翻譯中…" else "🌐 翻譯成中文＋相關台股")
+                }
+            }
+            if (s.batchRunning || s.translating) AiProgress(s)
+            Text("共 ${shown.size} 則 · 已翻譯 ${shown.count { it.id in s.translations }} 則", fontSize = 11.sp, color = Neutral)
         }
         if (shown.isEmpty()) item {
             Text(if (s.loading) "載入中…" else "目前沒有資料，請按右上角重新整理", color = Neutral, modifier = Modifier.padding(16.dp))
         }
         items(shown, key = { it.id }) { item ->
-            NewsCard(item, s.analyses[item.id], item.id in s.analyzing) { onOpen(item) }
+            NewsCard(item, s.analyses[item.id], item.id in s.analyzing, s.translations[item.id], onStock) { onOpen(item) }
         }
     }
 }
@@ -500,10 +532,25 @@ fun DetailScreen(vm: MainViewModel, s: UiState, news: NewsItem, onStock: (String
         item {
             Text("${news.cat.label} · ${news.source} · ${fullTime(news.time)}", fontSize = 12.sp, color = Neutral)
             Spacer(Modifier.height(4.dp))
-            Text(news.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            if (news.body.isNotBlank() && news.body != news.title) {
-                Spacer(Modifier.height(6.dp))
-                Text(news.body.take(3000), fontSize = 14.sp)
+            val tr = s.translations[news.id]
+            if (tr != null && tr.zh.isNotBlank()) {
+                Text("🌐 中文翻譯", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                Text(tr.zh, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("原文", fontSize = 12.sp, color = Neutral)
+                Text(if (news.body.length > news.title.length) news.body.take(3000) else news.title, fontSize = 13.sp, color = Neutral)
+            } else {
+                Text(news.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (news.body.isNotBlank() && news.body != news.title) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(news.body.take(3000), fontSize = 14.sp)
+                }
+                if (s.translating) AiProgress(s)
+                else TextButton(onClick = { vm.translateBatch(listOf(news)) }) { Text("🌐 翻譯成中文") }
+            }
+            if (tr != null && tr.stocks.isNotEmpty()) {
+                SectionTitle("可能相關的台股")
+                tr.stocks.forEach { PickRow(it, s.quotes[it.code], onStock) }
             }
             Row(Modifier.padding(top = 10.dp)) {
                 if (news.link.isNotBlank()) OutlinedButton(onClick = { runCatching { uri.openUri(news.link) } }) { Text("開啟原文") }
@@ -701,7 +748,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
         item { Disclaimer() }
         if (related.isNotEmpty()) {
             item { SectionTitle("🇺🇸 相關美國消息") }
-            items(related.take(15), key = { "r_" + it.id }) { NewsCard(it, s.analyses[it.id], it.id in s.analyzing) { onNews(it) } }
+            items(related.take(15), key = { "r_" + it.id }) { NewsCard(it, s.analyses[it.id], it.id in s.analyzing, s.translations[it.id], onStock = {}) { onNews(it) } }
         }
         val tw = s.stockNews[code]
         item { SectionTitle("🇹🇼 台灣個股新聞") }
@@ -733,6 +780,7 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
     var notifyAi by remember { mutableStateOf(st.notifyAi) }
     var interval by remember { mutableIntStateOf(st.intervalMin) }
     var kw by remember { mutableStateOf(st.alertKeywords) }
+    var autoTr by remember { mutableStateOf(st.autoTranslate) }
 
     LazyColumn(contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -758,6 +806,15 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
                 }
             }
             OutlinedButton(onClick = { vm.loadModels(key) }, enabled = key.isNotBlank()) { Text("讀取我可用的模型") }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("川普貼文自動翻譯成中文")
+                    Text("每次更新自動翻譯最新 30 則並標出相關台股（每 10 則用 1 次 AI 額度）", fontSize = 12.sp, color = Neutral)
+                }
+                Switch(checked = autoTr, onCheckedChange = { autoTr = it })
+            }
         }
         item {
             HorizontalDivider()
@@ -812,7 +869,7 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
         }
         item {
             Button(
-                onClick = { vm.saveSettings(key, congress, model, notifyOn, notifyAi, interval, kw) },
+                onClick = { vm.saveSettings(key, congress, model, notifyOn, notifyAi, interval, kw, autoTr) },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("儲存設定") }
             Text("資料來源：Trump's Truth (trumpstruth.org)、Google News、CNBC、MarketWatch、Yahoo Finance、Federal Register、Congress.gov、台灣證交所、Yahoo 財經。", fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 10.dp))
