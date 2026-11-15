@@ -277,11 +277,11 @@ function translatePrompt(items) {
   return `你是專業財經翻譯兼台股分析師。請把下面每一則川普發言／美國消息翻譯成通順的繁體中文（台灣用語；常見名稱用台灣譯名，例如 Nvidia→輝達、Fed→聯準會），並判斷可能有關的台股。
 規則：
 - zh：完整翻出原文意思，不要省略或加油添醋；如果只是連結、影片、轉貼或沒有實質內容，寫「（影片／連結貼文）」再簡述。
-- stocks：0~4 檔最直接相關的台股，action 只能是「利多」或「利空」，reason 10~20 字說明關聯。跟台股沒關係就給空陣列，不要硬湊。
+- stocks：0~4 檔最直接相關的台股，action 只能是「利多」或「利空」，reason 10~20 字說明關聯，reason_en 是同一句的英文。跟台股沒關係就給空陣列，不要硬湊。
 - importance：1~5，對市場的影響程度（一般政治口水給 1）。
 - sentiment：對台股整體「利多／利空／中性」。
 ${STOCK_RULE}
-只輸出 JSON：{"items":[{"i":0,"zh":"","importance":1,"sentiment":"中性","stocks":[{"code":"2330","name":"台積電","action":"利多","reason":""}]}]}
+只輸出 JSON：{"items":[{"i":0,"zh":"","importance":1,"sentiment":"中性","stocks":[{"code":"2330","name":"台積電","action":"利多","reason":"","reason_en":""}]}]}
 每一則都要有，i 對應編號。
 
 ${list}`;
@@ -299,14 +299,15 @@ ${lines}
 
 只輸出 JSON：
 {"mood":"偏多/偏空/中性/震盪","mood_score":-5~5整數,"headline":"一句話總結今天最重要的事","events":[{"title":"事件(繁中)","impact":"對台股影響說明","sectors":["產業"]}],"buy":[{"code":"","name":"","action":"買進","confidence":0~100,"reason":""}],"sell":[{"code":"","name":"","action":"賣出","confidence":0~100,"reason":""}],"watch":[{"code":"","name":"","action":"觀望","confidence":0~100,"reason":""}],"advice":"今日操作建議與風險提醒（3~5句）"}
-events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。${STOCK_RULE} action 只能是「買進」「賣出」「觀望」。`;
+events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。${STOCK_RULE} action 只能是「買進」「賣出」「觀望」。
+另外請同時提供英文版：headline_en、advice_en，每個 event 加 title_en、impact_en，每檔股票加 reason_en。`;
 }
 
 const cleanCode = c => (String(c).toUpperCase().match(/\d{4,6}[A-Z]?/) || [String(c).trim()])[0];
 function normPicks(arr, def) {
   return (Array.isArray(arr) ? arr : []).filter(p => p && p.code).map(p => ({
     code: cleanCode(p.code), name: p.name || STOCK_NAMES[cleanCode(p.code)] || "", action: p.action || def,
-    confidence: p.confidence != null ? Math.max(0, Math.min(100, parseInt(p.confidence) || 0)) : undefined, reason: p.reason || "",
+    confidence: p.confidence != null ? Math.max(0, Math.min(100, parseInt(p.confidence) || 0)) : undefined, reason: p.reason || "", reason_en: p.reason_en || "",
   }));
 }
 
@@ -380,9 +381,9 @@ async function main() {
       if (pick.length) try {
         const o = await ask(briefPrompt(pick, markets));
         brief = {
-          t: Date.now(), mood: o.mood || "中性", mood_score: Math.max(-5, Math.min(5, parseInt(o.mood_score) || 0)), headline: o.headline || "",
-          events: (o.events || []).map(e => ({ title: e.title || "", impact: e.impact || "", sectors: e.sectors || [] })),
-          buy: normPicks(o.buy, "買進"), sell: normPicks(o.sell, "賣出"), watch: normPicks(o.watch, "觀望"), advice: o.advice || "",
+          t: Date.now(), mood: o.mood || "中性", mood_score: Math.max(-5, Math.min(5, parseInt(o.mood_score) || 0)), headline: o.headline || "", headline_en: o.headline_en || "",
+          events: (o.events || []).map(e => ({ title: e.title || "", impact: e.impact || "", title_en: e.title_en || "", impact_en: e.impact_en || "", sectors: e.sectors || [] })),
+          buy: normPicks(o.buy, "買進"), sell: normPicks(o.sell, "賣出"), watch: normPicks(o.watch, "觀望"), advice: o.advice || "", advice_en: o.advice_en || "",
         };
         log("日報已更新");
       } catch (e) { log("日報失敗", e.message); }

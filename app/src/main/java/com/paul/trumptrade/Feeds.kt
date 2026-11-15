@@ -114,6 +114,7 @@ object Sources {
     val list = listOf(
         Src("Truth Social", Cat.TRUMP, "https://www.trumpstruth.org/feed"),
         Src("Google News", Cat.TRUMP, gnews("Trump (tariff OR trade OR economy OR chips OR Fed OR tax OR China OR Taiwan OR stocks OR deal) when:1d")),
+        Src("Google News", Cat.TRUMP, gnews("Trump (interview OR remarks OR speech OR \"press conference\" OR \"told reporters\" OR \"Oval Office\" OR \"town hall\") when:2d")),
         Src("Google News", Cat.NEWS, "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en"),
         Src("Google News", Cat.NEWS, gnews("(stocks OR \"Wall Street\" OR Nasdaq OR \"S&P 500\" OR Nvidia OR semiconductor) when:1d")),
         Src("CNBC", Cat.NEWS, "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"),
