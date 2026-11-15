@@ -388,4 +388,13 @@ async function main() {
   log("完成：", items.length, "則，", errors.length, "個來源失敗", aiNote);
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+// 就算這次出錯，也保留上一版資料，網站不會變空白
+main().catch(async e => {
+  console.error("本次更新失敗：", e);
+  try {
+    const prev = JSON.parse(await get(`${PAGES}?t=${Date.now()}`));
+    prev.errors = [...(prev.errors || []), "最近一次雲端更新失敗，顯示上一次資料"];
+    mkdirSync("web/data", { recursive: true });
+    writeFileSync("web/data/data.json", JSON.stringify(prev));
+  } catch { }
+});
