@@ -113,7 +113,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (res.items.isEmpty()) toast(tr("讀取失敗，請確認網路連線", "Failed to load, check your connection"))
             refreshQuotes()
-            if (store.autoTranslate) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
+            if (store.autoTranslate && !Lang.en) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
         }
     }
 

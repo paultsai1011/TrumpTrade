@@ -487,7 +487,7 @@ fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onStock: (String) -> Unit,
     var q by rememberSaveable(cat.name) { mutableStateOf("") }
     var kind by rememberSaveable { mutableStateOf(TrumpKind.ALL) }
     LaunchedEffect(cat, s.items.size, s.translations.size, s.translating) {
-        if (cat == Cat.TRUMP && vm.store.autoTranslate) vm.translateBatch(s.items.filter { it.cat == Cat.TRUMP }, auto = true)
+        if (cat == Cat.TRUMP && vm.store.autoTranslate && !Lang.en) vm.translateBatch(s.items.filter { it.cat == Cat.TRUMP }, auto = true)
     }
     val shown = s.items.filter { it.cat == cat }
         .filter { cat != Cat.TRUMP || kind == TrumpKind.ALL || trumpKind(it) == kind }
@@ -523,14 +523,14 @@ fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onStock: (String) -> Unit,
                     Text(if (s.batchRunning) tr("分析中…", "Analyzing…") else tr("AI 分析前5則", "AI: top 5"))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            if (!Lang.en) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                 OutlinedButton(onClick = { vm.translateBatch(shown) }, enabled = !s.translating) {
                     Text(if (s.translating) tr("翻譯中…", "Translating…") else tr("🌐 翻譯成中文＋相關台股", "🌐 Translate + tag stocks"))
                 }
             }
             if (s.batchRunning || s.translating) AiProgress(s)
             Legend()
-            Text(tr("共 ${shown.size} 則 · 已翻譯 ${shown.count { it.id in s.translations }} 則", "${shown.size} items · ${shown.count { it.id in s.translations }} translated"), fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 6.dp))
+            Text(tr("共 ${shown.size} 則 · 已翻譯 ${shown.count { it.id in s.translations }} 則", "${shown.size} items"), fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 6.dp))
         }
         if (shown.isEmpty()) item {
             Text(if (s.loading) tr("載入中…", "Loading…") else tr("目前沒有資料，請按右上角重新整理", "No data yet. Tap refresh at the top right."), color = Neutral, modifier = Modifier.padding(16.dp))
@@ -603,8 +603,10 @@ fun DetailScreen(vm: MainViewModel, s: UiState, news: NewsItem, onStock: (String
                     Spacer(Modifier.height(6.dp))
                     Text(news.body.take(3000), fontSize = 14.sp)
                 }
-                if (s.translating) AiProgress(s)
-                else TextButton(onClick = { vm.translateBatch(listOf(news)) }) { Text(tr("🌐 翻譯成中文", "🌐 Translate to Chinese")) }
+                if (!Lang.en) {
+                    if (s.translating) AiProgress(s)
+                    else TextButton(onClick = { vm.translateBatch(listOf(news)) }) { Text("🌐 翻譯成中文") }
+                }
             }
             if (trx != null && trx.stocks.isNotEmpty()) {
                 SectionTitle(tr("可能相關的台股", "Possibly related Taiwan stocks"))
