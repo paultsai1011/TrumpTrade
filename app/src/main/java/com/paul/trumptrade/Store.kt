@@ -24,6 +24,9 @@ class Store(ctx: Context) {
     var lastModel: String
         get() = str("last_model")
         set(v) = put("last_model", v)
+    var lastLiteModel: String
+        get() = str("last_lite_model")
+        set(v) = put("last_lite_model", v)
     var modelCache: String
         get() = str("model_cache")
         set(v) = put("model_cache", v)

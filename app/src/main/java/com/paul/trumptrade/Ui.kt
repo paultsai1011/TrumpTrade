@@ -481,7 +481,7 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
 fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onStock: (String) -> Unit, onOpen: (NewsItem) -> Unit) {
     var onlyTw by rememberSaveable(cat.name) { mutableStateOf(false) }
     var q by rememberSaveable(cat.name) { mutableStateOf("") }
-    LaunchedEffect(cat, s.items.size) {
+    LaunchedEffect(cat, s.items.size, s.translations.size, s.translating) {
         if (cat == Cat.TRUMP && vm.store.autoTranslate) vm.translateBatch(s.items.filter { it.cat == Cat.TRUMP }, auto = true)
     }
     val shown = s.items.filter { it.cat == cat }.filter { item ->

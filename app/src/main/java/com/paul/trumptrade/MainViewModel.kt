@@ -96,6 +96,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val res = withContext(Dispatchers.IO) { Repo.fetchAll(store) }
             val mk = withContext(Dispatchers.IO) { runCatching { Markets.fetch() }.getOrDefault(emptyList()) }
             if (res.items.isNotEmpty()) withContext(Dispatchers.IO) { store.saveItems(res.items) }
+            mergeCloud()
             val an = withContext(Dispatchers.IO) { store.loadAnalyses() }
             upd {
                 it.copy(
@@ -112,6 +113,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (store.autoTranslate) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
         }
     }
+
+    /** 合併網頁版雲端翻譯與日報（雲端已翻的，App 就不再花額度翻） */
+    private suspend fun mergeCloud() {
+        val c = withContext(Dispatchers.IO) { runCatching { Repo.cloud() }.getOrNull() } ?: return
+        val have = _s.value.translations
+        val add = c.tr.filterKeys { it !in have }
+        if (add.isNotEmpty()) {
+            withContext(Dispatchers.IO) { store.saveTranslations(add) }
+            val parsed = add.mapValues { parseTranslation(it.value) }
+            upd { it.copy(translations = it.translations + parsed) }
+        }
+        val b = c.brief
+        if (b != null && b.optLong("_t") > (_s.value.brief?.time ?: 0L) && b.s("mood").isNotBlank()) {
+            withContext(Dispatchers.IO) { store.saveBrief(b) }
+            upd { it.copy(brief = parseBrief(b)) }
+        }
+    }
+
+    private var lastTrFail = 0L
+    private val trAttempted = HashSet<String>()
 
     fun refreshQuotes(extra: Collection<String> = emptyList()) {
         val s = _s.value
@@ -175,7 +196,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun translateBatch(items: List<NewsItem>, auto: Boolean = false) {
         if (_s.value.translating) return
         if (store.geminiKey.isBlank()) { if (!auto) toast("請先到「設定」輸入 Gemini API Key"); return }
-        val todo = items.filter { it.id !in _s.value.translations }.take(if (auto) 30 else 40)
+        if (auto && System.currentTimeMillis() - lastTrFail < 5 * 60_000L) return
+        val todo = items.filter { it.id !in _s.value.translations && (!auto || it.id !in trAttempted) }.take(if (auto) 30 else 40)
+        trAttempted.addAll(todo.map { it.id })
         if (todo.isEmpty()) { if (!auto) toast("這頁都翻譯好了"); return }
         upd { it.copy(translating = true) }
         aiBegin()
@@ -184,7 +207,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val chunks = todo.chunked(10)
                 for ((ci, chunk) in chunks.withIndex()) {
                     onAi("翻譯中 ${ci * 10 + 1}~${ci * 10 + chunk.size} / ${todo.size} 則")
-                    val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.translate(chunk)) }
+                    val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.translate(chunk), lite = true) }
                     val arr = o.optJSONArray("items") ?: continue
                     val raw = HashMap<String, org.json.JSONObject>()
                     for (k in 0 until arr.length()) {
@@ -202,7 +225,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (ci < chunks.size - 1) delay(1500)
                 }
             } catch (e: Exception) {
-                if (!auto) toast(e.message ?: "翻譯失敗") else toast("自動翻譯暫停：${e.message}")
+                lastTrFail = System.currentTimeMillis()
+                val m = e.message ?: "翻譯失敗"
+                toast(if (m.contains("429")) "今天的免費 AI 額度暫時用完，5 分鐘後自動再試（雲端翻好的仍會顯示）" else m)
             } finally {
                 upd { it.copy(translating = false) }
                 aiEnd()

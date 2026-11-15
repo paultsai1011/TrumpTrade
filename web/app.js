@@ -99,18 +99,19 @@ async function gen(model, prompt, useThink = true) {
   const o = JSON.parse(text);
   return (o.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("");
 }
-async function ask(prompt) {
+async function ask(prompt, lite = false) {
   if (!S.key) throw new Error("請先到 ⚙ 設定輸入 Gemini API Key");
   let list = await models();
-  const ok = LS.get("lastModel", "");
+  if (lite) list = [...list.filter(m => m.includes("lite")), ...list.filter(m => !m.includes("lite"))];
+  const ok = LS.get(lite ? "lastLite" : "lastModel", "");
   if (ok && list.includes(ok)) list = [ok, ...list.filter(m => m !== ok)];
   let last;
-  for (const m of list.slice(0, 3)) {
+  for (const m of list.slice(0, 4)) {
     try {
       const t = await gen(m, prompt);
       const s = t.replace(/```json|```/g, ""); const a = s.indexOf("{"), b = s.lastIndexOf("}");
       const o = JSON.parse(s.slice(a, b + 1));
-      LS.set("lastModel", m);
+      LS.set(lite ? "lastLite" : "lastModel", m);
       return o;
     } catch (e) {
       last = e;
@@ -118,7 +119,7 @@ async function ask(prompt) {
       if (e.status === 403) throw new Error("API Key 沒有權限 (403)");
     }
   }
-  if (last?.status === 429) throw new Error("免費額度暫時用完(429)，請稍後再試");
+  if (last?.status === 429) throw new Error("今天的免費 AI 額度暫時用完(429)，請稍後再試");
   throw new Error("AI 分析失敗：" + (last?.message || ""));
 }
 const cleanCode = c => (String(c).toUpperCase().match(/\d{4,6}[A-Z]?/) || [String(c).trim()])[0];
@@ -204,7 +205,7 @@ function translate(items) {
     for (let i = 0; i < todo.length; i += 10) {
       const chunk = todo.slice(i, i + 10);
       status(`翻譯中 ${i + 1}~${i + chunk.length} / ${todo.length} 則`);
-      const o = await ask(P.translate(chunk));
+      const o = await ask(P.translate(chunk), true);
       for (const [k, e] of (o.items || []).entries()) {
         const it = chunk[e.i ?? k]; if (!it || !e.zh) continue;
         S.localTr[it.id] = { zh: e.zh, importance: Math.max(1, Math.min(5, parseInt(e.importance) || 1)), sentiment: e.sentiment || "中性", stocks: norm(e.stocks, "相關"), t: Date.now() };
@@ -286,7 +287,7 @@ function briefHtml() {
   const b = lb && (!sb || (lb.t || 0) > (sb.t || 0)) ? lb : sb;
   let h = `<div class="card"><div class="row"><b class="grow" style="font-size:17px">🤖 AI 今日盤勢日報</b>
     ${S.key ? `<button class="btn" data-act="brief" ${S.busy.brief ? "disabled" : ""}>${b ? "重新產生" : "產生"}</button>` : ""}</div>${progress("brief")}`;
-  if (!b) return h + `<div class="sub">${S.key ? "按「產生」讓 AI 讀完最近的川普發言、政策與美股新聞，整理出台股可能的買進／賣出名單。" : "雲端每 3 小時自動產生（需在 GitHub 設定 GEMINI_API_KEY），或到 ⚙ 設定填入自己的 Key 立即產生。"}</div></div>`;
+  if (!b) return h + `<div class="sub">${S.key ? "按「產生」讓 AI 讀完最近的川普發言、政策與美股新聞，整理出台股可能的買進／賣出名單。" : "雲端每 6 小時自動產生（需在 GitHub 設定 GEMINI_API_KEY），或到 ⚙ 設定填入自己的 Key 立即產生。"}</div></div>`;
   h += `<div class="sub">${full(b.t)} 產生</div>
     <div class="row" style="margin:6px 0"><span class="${senCls(b.mood)}" style="font-size:20px;font-weight:bold">${esc(b.mood)}</span>
     <span class="${cls(b.mood_score)}">情緒分數 ${b.mood_score > 0 ? "+" : ""}${b.mood_score}</span></div>
@@ -468,7 +469,7 @@ function pageSettings() {
     <div class="sub">Key 只存在這個瀏覽器裡（不會上傳）。填了之後可以：翻譯還沒翻的消息、單則 AI 深度分析、個股買賣分析、自己產生日報。<br>
     目前使用模型：${esc(LS.get("lastModel", "") || "尚未使用（自動選最新免費 Flash）")}</div>
     <h2>☁️ 雲端自動更新</h2>
-    <div class="sub">資料由 GitHub 每 20 分鐘自動抓取。若在 GitHub 倉庫設定了 <b>GEMINI_API_KEY</b>，雲端會自動翻譯川普貼文、標出相關台股，並每 3 小時產生一次 AI 日報，所有裝置打開就看得到。<br>
+    <div class="sub">資料由 GitHub 每 20 分鐘自動抓取。若在 GitHub 倉庫設定了 <b>GEMINI_API_KEY</b>，雲端會自動翻譯川普貼文、標出相關台股，並每 6 小時產生一次 AI 日報，所有裝置打開就看得到。<br>
     最近更新：${full(S.data.updated)}<br>${esc(S.data.aiNote || "雲端 AI：已啟用")}</div>
     <h2>📱 安裝</h2>
     <div class="sub">手機瀏覽器選單 →「加到主畫面」，就能像 App 一樣開啟。<br>Android App 版：<a href="https://github.com/paultsai1011/TrumpTrade/releases/latest/download/TrumpTrade.apk">下載 APK</a></div>

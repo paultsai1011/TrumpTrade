@@ -97,19 +97,30 @@ object Gemini {
         return JSONObject(s.substring(a, b + 1))
     }
 
-    fun ask(store: Store, prompt: String, onStatus: (String) -> Unit = {}): JSONObject {
+    /**
+     * lite = true：翻譯這種簡單工作優先用 Flash-Lite（免費額度多很多、速度快），
+     * 深度分析才用一般 Flash。兩種模型的免費額度是分開計算的。
+     */
+    fun ask(store: Store, prompt: String, onStatus: (String) -> Unit = {}, lite: Boolean = false): JSONObject {
         val key = store.geminiKey
         if (key.isBlank()) throw IllegalStateException("請先到「設定」輸入 Gemini API Key")
         var last: Exception? = null
         var list = candidates(store)
-        // 上次成功的模型優先，省掉失敗重試的時間
-        val ok = store.lastModel
-        if (store.model == "auto" && ok.isNotBlank() && ok in list) list = listOf(ok) + list.filter { it != ok }
-        for ((i, m) in list.take(3).withIndex()) {
-            onStatus(if (i == 0) "AI 分析中（$m）" else "換模型重試（$m）")
+        if (lite) {
+            val l = list.filter { it.contains("lite") }
+            list = l + list.filter { !it.contains("lite") }
+            val ok = store.lastLiteModel
+            if (ok.isNotBlank() && ok in list) list = listOf(ok) + list.filter { it != ok }
+        } else {
+            // 上次成功的模型優先，省掉失敗重試的時間
+            val ok = store.lastModel
+            if (store.model == "auto" && ok.isNotBlank() && ok in list) list = listOf(ok) + list.filter { it != ok }
+        }
+        for ((i, m) in list.take(4).withIndex()) {
+            onStatus(if (i == 0) "AI 處理中（$m）" else "換模型重試（$m）")
             try {
                 val o = extractJson(generate(key, m, prompt))
-                store.lastModel = m
+                if (lite) store.lastLiteModel = m else store.lastModel = m
                 return o
             } catch (e: HttpException) {
                 last = e

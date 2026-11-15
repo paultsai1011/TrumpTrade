@@ -226,6 +226,28 @@ object Repo {
 
     suspend fun fetchAll(store: Store): Result = fetch(Sources.list, store.congressKey)
 
+    data class Cloud(val tr: Map<String, JSONObject>, val brief: JSONObject?)
+
+    /** 讀網頁版雲端已經翻好的資料，App 就不用重複翻譯、省 AI 額度 */
+    fun cloud(): Cloud {
+        val o = JSONObject(Net.get("https://paultsai1011.github.io/TrumpTrade/data/data.json?t=${System.currentTimeMillis()}", timeout = 20000))
+        val tr = HashMap<String, JSONObject>()
+        fun take(id: String, t: JSONObject?) {
+            if (t == null || t.s("zh").isBlank()) return
+            t.put("_t", t.optLong("t", System.currentTimeMillis()))
+            tr[id] = t
+        }
+        o.optJSONArray("items")?.let { a ->
+            for (i in 0 until a.length()) {
+                val it = a.optJSONObject(i) ?: continue
+                take(it.s("id"), it.optJSONObject("tr"))
+            }
+        }
+        o.optJSONObject("extraTr")?.let { m -> m.keys().forEach { k -> take(k, m.optJSONObject(k)) } }
+        val b = o.optJSONObject("brief")?.also { it.put("_t", it.optLong("t", 0L)) }
+        return Cloud(tr, b)
+    }
+
     /** 個股中文新聞（Google News 台灣） */
     fun stockNews(code: String, name: String): List<NewsItem> {
         val q = if (name.isNotBlank()) "$name $code when:7d" else "$code 股票 when:7d"

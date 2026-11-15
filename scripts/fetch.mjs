@@ -246,13 +246,18 @@ function extractJson(t) {
   const s = t.replace(/```json|```/g, ""); const a = s.indexOf("{"), b = s.lastIndexOf("}");
   return JSON.parse(s.slice(a, b + 1));
 }
-let LAST_OK = "";
-async function ask(prompt) {
+let LAST_OK = "", LAST_LITE = "";
+// lite=true：翻譯用 Flash-Lite（免費額度較多），日報用一般 Flash；兩者額度分開計算
+async function ask(prompt, lite = false) {
   MODELS = MODELS || await rankModels();
-  if (LAST_OK && MODELS.includes(LAST_OK)) MODELS = [LAST_OK, ...MODELS.filter(m => m !== LAST_OK)];
+  let list = MODELS;
+  if (lite) {
+    list = [...MODELS.filter(m => m.includes("lite")), ...MODELS.filter(m => !m.includes("lite"))];
+    if (LAST_LITE && list.includes(LAST_LITE)) list = [LAST_LITE, ...list.filter(m => m !== LAST_LITE)];
+  } else if (LAST_OK && list.includes(LAST_OK)) list = [LAST_OK, ...list.filter(m => m !== LAST_OK)];
   let last;
-  for (const m of MODELS.slice(0, 3)) {
-    try { const o = extractJson(await gen(m, prompt)); log("AI OK", m); LAST_OK = m; return o; }
+  for (const m of list.slice(0, 4)) {
+    try { const o = extractJson(await gen(m, prompt)); log("AI OK", m); if (lite) LAST_LITE = m; else LAST_OK = m; return o; }
     catch (e) { last = e; log("AI 失敗", m, e.message); if (e.status === 400 && /API key/i.test(e.body || "")) break; }
   }
   throw last;
@@ -311,7 +316,7 @@ async function main() {
   const prevTr = {};
   for (const it of prev.items || []) if (it.tr) prevTr[it.id] = it.tr;
   Object.assign(prevTr, prev.extraTr || {});
-  LAST_OK = prev.lastModel || "";
+  LAST_OK = prev.lastModel || ""; LAST_LITE = prev.lastLite || "";
 
   const results = await Promise.all(SOURCES.map(async s => {
     try { const r = await fetchSource(s); log(`${s[0]}(${s[1]}) ${r.length} 則`); return r; }
@@ -336,14 +341,13 @@ async function main() {
   let brief = prev.brief || null;
   let aiNote = GEMINI_KEY ? "" : "雲端未設定 GEMINI_API_KEY，翻譯需在網頁設定自己的 Key";
   if (GEMINI_KEY) {
-    const todo = [
-      ...items.filter(it => it.cat === "TRUMP" && !it.tr).slice(0, 30),
-      ...items.filter(it => it.cat === "POLICY" && !it.tr && it.themes.length).slice(0, 10),
-    ];
+    // 省額度：只翻最近 48 小時的川普分頁，每次最多 20 則（2 次 AI 請求）
+    const cut48 = Date.now() - 48 * 3600_000;
+    const todo = items.filter(it => it.cat === "TRUMP" && !it.tr && (!it.time || it.time > cut48)).slice(0, 20);
     for (let i = 0; i < todo.length; i += 10) {
       const chunk = todo.slice(i, i + 10);
       try {
-        const o = await ask(translatePrompt(chunk));
+        const o = await ask(translatePrompt(chunk), true);
         for (const [k, e] of (o.items || []).entries()) {
           const it = chunk[e.i ?? k]; if (!it || !e.zh) continue;
           it.tr = { zh: e.zh, importance: Math.max(1, Math.min(5, parseInt(e.importance) || 1)), sentiment: e.sentiment || "中性", stocks: normPicks(e.stocks, "相關"), t: Date.now() };
@@ -353,7 +357,7 @@ async function main() {
       await new Promise(r => setTimeout(r, 1500));
     }
     const briefAge = brief ? Date.now() - (brief.t || 0) : Infinity;
-    if (briefAge > 3 * 3600_000) {
+    if (briefAge > 6 * 3600_000) {
       const cutoff = Date.now() - 36 * 3600_000;
       const recent = items.filter(it => !it.time || it.time > cutoff);
       const top = (c, n) => recent.filter(it => it.cat === c).sort((a, b) => (b.themes.length > 0) - (a.themes.length > 0)).slice(0, n);
@@ -383,7 +387,7 @@ async function main() {
   for (const [k, v] of Object.entries(prevTr)) if (!live.has(k) && Date.now() - (v.t || 0) < 3 * 86400_000) extraTr[k] = v;
 
   mkdirSync("web/data", { recursive: true });
-  const data = { updated: Date.now(), items, markets, quotes: Object.keys(quotes).length ? quotes : (prev.quotes || {}), brief, errors, aiNote, extraTr, lastModel: LAST_OK };
+  const data = { updated: Date.now(), items, markets, quotes: Object.keys(quotes).length ? quotes : (prev.quotes || {}), brief, errors, aiNote, extraTr, lastModel: LAST_OK, lastLite: LAST_LITE };
   writeFileSync("web/data/data.json", JSON.stringify(data));
   log("完成：", items.length, "則，", errors.length, "個來源失敗", aiNote);
 }
