@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>川普財經雷達</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <button id="back" class="icon hidden" aria-label="返回">←</button>
+  <h1 id="title">川普財經雷達</h1>
+  <button id="reload" class="icon" aria-label="重新整理">⟳</button>
+  <button id="gear" class="icon" aria-label="設定">⚙</button>
+</header>
+<div id="bar" class="hidden"></div>
+<main id="view"></main>
+<nav id="tabs">
+  <button data-tab="home" class="on"><span>🏠</span>總覽</button>
+  <button data-tab="TRUMP"><span>🇺🇸</span>川普</button>
+  <button data-tab="NEWS"><span>📰</span>財經</button>
+  <button data-tab="POLICY"><span>📜</span>政策法案</button>
+  <button data-tab="stocks"><span>⭐</span>台股</button>
+</nav>
+<div id="toast" class="hidden"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

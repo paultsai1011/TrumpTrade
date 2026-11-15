@@ -3,6 +3,12 @@ name: Build APK
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "web/**"
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/pages.yml"
+      - "README.md"
   workflow_dispatch:
 
 permissions:

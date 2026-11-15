@@ -1,0 +1,11 @@
+{
+  "name": "川普財經雷達",
+  "short_name": "川普雷達",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#111418",
+  "theme_color": "#111418",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

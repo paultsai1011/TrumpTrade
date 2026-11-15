@@ -29,3 +29,8 @@
 每次推送到 `main`，GitHub Actions 會自動編譯並發佈到 Releases。
 
 > ⚠️ AI 分析僅供參考，不構成投資建議。
+
+## 網頁版
+https://paultsai1011.github.io/TrumpTrade/
+
+GitHub Actions 每 20 分鐘自動抓新聞、報價；若設定 `GEMINI_API_KEY` secret，雲端會自動翻譯川普貼文、標出相關台股並產生 AI 日報。手機瀏覽器「加到主畫面」即可像 App 一樣使用。
