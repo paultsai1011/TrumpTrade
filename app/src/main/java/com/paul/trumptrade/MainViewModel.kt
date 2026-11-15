@@ -35,6 +35,7 @@ data class UiState(
     val update: Updater.Info? = null,
     val translations: Map<String, Translation> = emptyMap(),
     val translating: Boolean = false,
+    val briefTranslating: Boolean = false,
     val updateDismissed: Boolean = false,
 )
 
@@ -68,7 +69,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setLang(en: Boolean) { Lang.en = en; store.english = en }
+    fun setLang(en: Boolean) { Lang.en = en; store.english = en; if (en) ensureBriefEnglish() }
+
+    /** 英文模式下，若日報還沒有英文版，用 Flash-Lite 翻一次（每份日報只翻一次） */
+    fun ensureBriefEnglish() {
+        val b = _s.value.brief ?: return
+        if (!Lang.en || b.headlineEn.isNotBlank() || _s.value.briefTranslating || _s.value.briefLoading) return
+        if (store.geminiKey.isBlank()) return
+        upd { it.copy(briefTranslating = true) }
+        aiBegin()
+        onAi("Translating brief to English")
+        viewModelScope.launch {
+            try {
+                val raw = withContext(Dispatchers.IO) { store.loadBriefJson() } ?: return@launch
+                val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.briefToEnglish(raw), lite = true) }
+                raw.put("headline_en", o.s("headline_en")).put("advice_en", o.s("advice_en"))
+                fun mergeArr(key: String, fields: List<String>) {
+                    val dst = raw.optJSONArray(key) ?: return
+                    val src = o.optJSONArray(key) ?: return
+                    for (i in 0 until minOf(dst.length(), src.length())) {
+                        val d = dst.optJSONObject(i) ?: continue
+                        val e = src.optJSONObject(i) ?: continue
+                        fields.forEach { f -> d.put(f, e.s(f)) }
+                    }
+                }
+                mergeArr("events", listOf("title_en", "impact_en"))
+                listOf("buy", "sell", "watch").forEach { mergeArr(it, listOf("reason_en")) }
+                withContext(Dispatchers.IO) { store.saveBrief(raw) }
+                upd { it.copy(brief = parseBrief(raw)) }
+            } catch (e: Exception) {
+                toast("Could not translate the brief: ${e.message}")
+            } finally {
+                upd { it.copy(briefTranslating = false) }
+                aiEnd()
+            }
+        }
+    }
 
     fun dismissUpdate() = upd { it.copy(updateDismissed = true) }
 
@@ -100,6 +136,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val mk = withContext(Dispatchers.IO) { runCatching { Markets.fetch() }.getOrDefault(emptyList()) }
             if (res.items.isNotEmpty()) withContext(Dispatchers.IO) { store.saveItems(res.items) }
             mergeCloud()
+            ensureBriefEnglish()
             val an = withContext(Dispatchers.IO) { store.loadAnalyses() }
             upd {
                 it.copy(

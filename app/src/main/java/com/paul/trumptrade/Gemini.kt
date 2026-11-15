@@ -195,6 +195,25 @@ $list
 """.trimIndent()
     }
 
+    /** 把舊的中文日報補上英文欄位 */
+    fun briefToEnglish(b: JSONObject): String {
+        val src = JSONObject()
+            .put("headline", b.s("headline")).put("advice", b.s("advice"))
+            .put("events", JSONArray().apply {
+                b.optJSONArray("events")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { e -> put(JSONObject().put("title", e.s("title")).put("impact", e.s("impact"))) } }
+            })
+        for (k in listOf("buy", "sell", "watch")) src.put(k, JSONArray().apply {
+            b.optJSONArray(k)?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { p -> put(JSONObject().put("reason", p.s("reason"))) } }
+        })
+        return """
+Translate this Traditional Chinese stock-market brief into natural, concise English for foreign investors.
+Return JSON with the SAME structure and order, only these keys:
+{"headline_en":"","advice_en":"","events":[{"title_en":"","impact_en":""}],"buy":[{"reason_en":""}],"sell":[{"reason_en":""}],"watch":[{"reason_en":""}]}
+
+$src
+""".trimIndent()
+    }
+
     fun brief(items: List<NewsItem>, markets: List<MarketQuote>): String {
         val lines = items.joinToString("\n") { "[${it.cat.label}][${it.source}][${fmt(it.time)}] ${it.title.take(200)}" }
         val mk = markets.joinToString("；") { "${it.label} ${"%.2f".format(it.price)} (${"%+.2f".format(it.pct)}%)" }.ifBlank { "（無資料）" }

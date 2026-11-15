@@ -154,6 +154,7 @@ class Store(ctx: Context) {
     }
 
     fun saveBrief(o: JSONObject) = writeFile("brief.json", o.toString())
+    fun loadBriefJson(): JSONObject? = readFile("brief.json")?.let { runCatching { JSONObject(it) }.getOrNull() }
     fun loadBrief(): Brief? = readFile("brief.json")?.let { runCatching { parseBrief(JSONObject(it)) }.getOrNull() }
 
     fun loadSeen(): MutableList<String> = try {

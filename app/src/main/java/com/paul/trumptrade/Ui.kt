@@ -132,6 +132,11 @@ fun ago(t: Long): String {
 fun fullTime(t: Long): String =
     if (t <= 0) "" else SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.TAIWAN).format(Date(t))
 
+fun marketLabel(m: MarketQuote): String = if (!Lang.en) m.label else when (m.symbol) {
+    "^GSPC" -> "S&P 500"; "^IXIC" -> "Nasdaq"; "^SOX" -> "SOX"; "TSM" -> "TSMC ADR"; "^TWII" -> "TAIEX"
+    "^VIX" -> "VIX"; "TWD=X" -> "USD/TWD"; else -> m.symbol
+}
+
 private fun tabs() = listOf(tr("總覽", "Home"), tr("川普", "Trump"), tr("財經", "Markets"), tr("政策法案", "Policy"), tr("台股", "TW Stocks"))
 
 @Composable
@@ -366,7 +371,7 @@ fun Overview(vm: MainViewModel, s: UiState, onStock: (String) -> Unit, onNews: (
                 s.markets.forEach { m ->
                     Card(Modifier.padding(end = 8.dp)) {
                         Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                            Text(m.label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(marketLabel(m), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("%,.2f".format(m.price), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text("%+.2f%%".format(m.pct), color = pctColor(m.pct), fontSize = 12.sp)
                         }
@@ -442,7 +447,7 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
                 if (s.briefLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Button(onClick = { vm.makeBrief() }) { Text(if (b == null) tr("產生", "Generate") else tr("更新", "Update")) }
             }
-            if (s.briefLoading) AiProgress(s)
+            if (s.briefLoading || s.briefTranslating) AiProgress(s)
             if (b == null) {
                 Text(tr("按「產生」讓 AI 讀完最近的川普發言、政策與美股新聞，整理出台股可能的買進／賣出名單。", "Tap Generate: AI reads recent Trump remarks, policy and US market news and lists Taiwan stocks to buy / sell."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 return@Column
@@ -461,7 +466,7 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
                     Text("• " + (if (Lang.en && e.titleEn.isNotBlank()) e.titleEn else e.title), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     val impact = if (Lang.en && e.impactEn.isNotBlank()) e.impactEn else e.impact
                     if (impact.isNotBlank()) Text(impact, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (e.sectors.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState())) { e.sectors.forEach { Tag(it) } }
+                    if (e.sectors.isNotEmpty() && !Lang.en) Row(Modifier.horizontalScroll(rememberScrollState())) { e.sectors.forEach { Tag(it) } }
                 }
             }
             if (b.buy.isNotEmpty()) { HorizontalDivider(Modifier.padding(vertical = 6.dp)); Text(tr("📈 可留意買進", "📈 Consider buying"), color = UpRed, fontWeight = FontWeight.Bold) }

@@ -390,6 +390,23 @@ async function main() {
     }
   }
 
+  // 舊日報沒有英文版 → 用 Flash-Lite 補翻一次（給英文模式用）
+  if (GEMINI_KEY && brief && !brief.headline_en) {
+    try {
+      const src = { headline: brief.headline, advice: brief.advice, events: (brief.events || []).map(e => ({ title: e.title, impact: e.impact })),
+        buy: brief.buy.map(p => ({ reason: p.reason })), sell: brief.sell.map(p => ({ reason: p.reason })), watch: brief.watch.map(p => ({ reason: p.reason })) };
+      const o = await ask(`Translate this Traditional Chinese stock-market brief into natural, concise English for foreign investors.
+Return JSON with the SAME structure and order, only these keys:
+{"headline_en":"","advice_en":"","events":[{"title_en":"","impact_en":""}],"buy":[{"reason_en":""}],"sell":[{"reason_en":""}],"watch":[{"reason_en":""}]}
+
+${JSON.stringify(src)}`, true);
+      brief.headline_en = o.headline_en || ""; brief.advice_en = o.advice_en || "";
+      (brief.events || []).forEach((e, i) => { e.title_en = o.events?.[i]?.title_en || ""; e.impact_en = o.events?.[i]?.impact_en || ""; });
+      for (const k of ["buy", "sell", "watch"]) brief[k].forEach((p, i) => { p.reason_en = o[k]?.[i]?.reason_en || ""; });
+      log("日報英文版已補上");
+    } catch (e) { log("日報英文翻譯失敗", e.message); }
+  }
+
   // 台股報價：所有題材股 + AI 提到的股票 + 預設自選
   const codes = new Set([...DEFAULT_WATCH, ...THEMES.flatMap(t => t.stocks.map(s => s[0]))]);
   for (const it of items) for (const p of it.tr?.stocks || []) codes.add(p.code);
