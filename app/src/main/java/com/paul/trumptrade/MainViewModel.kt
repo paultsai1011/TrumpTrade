@@ -54,6 +54,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _s.asStateFlow()
 
     init {
+        Lang.en = store.english
         refresh()
         checkUpdate(false)
     }
@@ -67,6 +68,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setLang(en: Boolean) { Lang.en = en; store.english = en }
+
     fun dismissUpdate() = upd { it.copy(updateDismissed = true) }
 
     fun startUpdate() {
@@ -78,7 +81,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toast(m: String) = upd { it.copy(message = m) }
     fun clearMessage() = upd { it.copy(message = null) }
 
-    private fun aiBegin() = upd { it.copy(aiStatus = "AI 準備中…", aiStart = System.currentTimeMillis()) }
+    private fun aiBegin() = upd { it.copy(aiStatus = tr("AI 準備中…", "AI starting…"), aiStart = System.currentTimeMillis()) }
     private val onAi: (String) -> Unit = { msg -> upd { it.copy(aiStatus = msg) } }
     private fun aiEnd() = upd { it.copy(aiStatus = "", aiStart = 0L) }
 
@@ -108,7 +111,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analyses = an,
                 )
             }
-            if (res.items.isEmpty()) toast("讀取失敗，請確認網路連線")
+            if (res.items.isEmpty()) toast(tr("讀取失敗，請確認網路連線", "Failed to load, check your connection"))
             refreshQuotes()
             if (store.autoTranslate) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
         }
@@ -199,14 +202,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (auto && System.currentTimeMillis() - lastTrFail < 5 * 60_000L) return
         val todo = items.filter { it.id !in _s.value.translations && (!auto || it.id !in trAttempted) }.take(if (auto) 30 else 40)
         trAttempted.addAll(todo.map { it.id })
-        if (todo.isEmpty()) { if (!auto) toast("這頁都翻譯好了"); return }
+        if (todo.isEmpty()) { if (!auto) toast(tr("這頁都翻譯好了", "All translated")); return }
         upd { it.copy(translating = true) }
         aiBegin()
         viewModelScope.launch {
             try {
                 val chunks = todo.chunked(10)
                 for ((ci, chunk) in chunks.withIndex()) {
-                    onAi("翻譯中 ${ci * 10 + 1}~${ci * 10 + chunk.size} / ${todo.size} 則")
+                    onAi(tr("翻譯中 ${ci * 10 + 1}~${ci * 10 + chunk.size} / ${todo.size} 則", "Translating ${ci * 10 + 1}–${ci * 10 + chunk.size} / ${todo.size}"))
                     val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.translate(chunk), lite = true) }
                     val arr = o.optJSONArray("items") ?: continue
                     val raw = HashMap<String, org.json.JSONObject>()
@@ -334,7 +337,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addWatch(raw: String) {
         val code = cleanCode(raw)
-        if (!Regex("\\d{4,6}[A-Z]?").matches(code)) { toast("請輸入台股代號，例如 2330"); return }
+        if (!Regex("\\d{4,6}[A-Z]?").matches(code)) { toast(tr("請輸入台股代號，例如 2330", "Enter a Taiwan stock code, e.g. 2330")); return }
         val list = (_s.value.watchlist + code).distinct()
         store.watchlist = list
         upd { it.copy(watchlist = list) }
@@ -376,7 +379,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.alertKeywords = keywords
         if (keyChanged) { store.modelCache = ""; store.modelCacheTime = 0L }
         App.schedule(getApplication())
-        toast("已儲存")
+        toast(tr("已儲存", "Saved"))
         if (autoTr && store.geminiKey.isNotBlank()) translateBatch(_s.value.items.filter { it.cat == Cat.TRUMP }, auto = true)
     }
 }

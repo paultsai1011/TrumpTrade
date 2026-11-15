@@ -67,6 +67,7 @@ const FR = "https://www.federalregister.gov/api/v1/documents.json?per_page=25&or
 const SOURCES = [
   ["Truth Social", "TRUMP", "https://www.trumpstruth.org/feed", "rss"],
   ["Google News", "TRUMP", gnews("Trump (tariff OR trade OR economy OR chips OR Fed OR tax OR China OR Taiwan OR stocks OR deal) when:1d"), "rss"],
+  ["Google News", "TRUMP", gnews('Trump (interview OR remarks OR speech OR "press conference" OR "told reporters" OR "Oval Office" OR "town hall") when:2d'), "rss"],
   ["Google News", "NEWS", "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en", "rss"],
   ["Google News", "NEWS", gnews('(stocks OR "Wall Street" OR Nasdaq OR "S&P 500" OR Nvidia OR semiconductor) when:1d'), "rss"],
   ["CNBC", "NEWS", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "rss"],
@@ -318,9 +319,23 @@ async function main() {
   Object.assign(prevTr, prev.extraTr || {});
   LAST_OK = prev.lastModel || ""; LAST_LITE = prev.lastLite || "";
 
+  const srcKey = s => s[2].replace(/when:\d+d|[?&]t=\d+/g, "").slice(0, 120);
   const results = await Promise.all(SOURCES.map(async s => {
-    try { const r = await fetchSource(s); log(`${s[0]}(${s[1]}) ${r.length} 則`); return r; }
-    catch (e) { errors.push(`${s[0]}(${CAT_LABEL[s[1]]}) 讀取失敗`); log(`${s[0]} 失敗`, e.message); return []; }
+    const key = srcKey(s);
+    let r = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { r = await fetchSource(s); break; }
+      catch (e) {
+        log(`${s[0]} 失敗(${attempt + 1})`, e.message);
+        if (attempt === 0) { await new Promise(res => setTimeout(res, 3000 + Math.random() * 3000)); continue; }
+        // 暫時失敗：沿用上一輪這個來源的資料
+        r = (prev.items || []).filter(it => it.src === key);
+        errors.push(`${s[0]}(${CAT_LABEL[s[1]]}) 暫時讀取失敗${r.length ? "，沿用上一輪" : ""}`);
+      }
+    }
+    r.forEach(it => it.src = key);
+    log(`${s[0]}(${s[1]}) ${r.length} 則`);
+    return r;
   }));
   const seen = new Set();
   let items = results.flat().sort((a, b) => b.time - a.time).filter(it => {
@@ -329,7 +344,7 @@ async function main() {
   });
   const ids = new Set(); items = items.filter(it => !ids.has(it.id) && ids.add(it.id));
   // 每類保留數量
-  const cap = { TRUMP: 80, NEWS: 120, POLICY: 80 };
+  const cap = { TRUMP: 100, NEWS: 120, POLICY: 80 };
   const cnt = {}; items = items.filter(it => (cnt[it.cat] = (cnt[it.cat] || 0) + 1) <= cap[it.cat]);
   if (!items.length && prev.items) { items = prev.items; errors.push("本次全部來源失敗，顯示上一次資料"); }
   for (const it of items) if (!it.tr && prevTr[it.id]) it.tr = prevTr[it.id];

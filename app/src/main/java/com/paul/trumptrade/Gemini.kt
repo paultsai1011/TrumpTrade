@@ -117,7 +117,7 @@ object Gemini {
             if (store.model == "auto" && ok.isNotBlank() && ok in list) list = listOf(ok) + list.filter { it != ok }
         }
         for ((i, m) in list.take(4).withIndex()) {
-            onStatus(if (i == 0) "AI 處理中（$m）" else "換模型重試（$m）")
+            onStatus(if (i == 0) tr("AI 處理中（$m）", "AI working ($m)") else tr("換模型重試（$m）", "Retrying with $m"))
             try {
                 val o = extractJson(generate(key, m, prompt))
                 if (lite) store.lastLiteModel = m else store.lastModel = m
@@ -143,6 +143,11 @@ object Prompts {
     private fun now(): String = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.TAIWAN).format(Date())
     fun fmt(t: Long): String = if (t <= 0) "未知" else SimpleDateFormat("MM/dd HH:mm", Locale.TAIWAN).format(Date(t))
 
+    /** 英文模式：文字欄位用英文，但判斷詞保持中文（App 用來上色） */
+    private fun langRule(): String = if (Lang.en)
+        "\n重要：除了 action、sentiment、mood 這些判斷詞維持中文關鍵字之外，其餘所有文字欄位（summary、impact、reason、advice 等）一律用英文撰寫，股票 name 用英文公司名。"
+    else ""
+
     private const val STOCK_RULE =
         "台股代號必須是真實存在的台灣上市櫃股票或ETF（4~6碼），name 用台灣常用簡稱。action 只能是「買進」「賣出」「觀望」其中之一。"
 
@@ -165,7 +170,7 @@ $hint
 
 只輸出 JSON，格式如下：
 {"summary":"繁體中文 2~4 句重點摘要（英文請翻譯）","importance":1~5整數(5=對市場影響極大),"sentiment":"利多/利空/中性/多空交雜","sectors":["受影響產業"],"us_impact":"對美國科技與民生的影響","tw_impact":"對台股與台灣產業鏈的影響","stocks":[{"code":"2330","name":"台積電","action":"買進","confidence":0~100,"reason":"一句理由"}],"risk":"主要風險與不確定性"}
-stocks 列出 2~6 檔最直接受影響的台股。$STOCK_RULE 若內容與市場無關，importance 給 1、stocks 給空陣列。
+stocks 列出 2~6 檔最直接受影響的台股。$STOCK_RULE 若內容與市場無關，importance 給 1、stocks 給空陣列。${langRule()}
 """.trimIndent()
     }
 
@@ -179,11 +184,11 @@ stocks 列出 2~6 檔最直接受影響的台股。$STOCK_RULE 若內容與市�
 你是專業財經翻譯兼台股分析師。請把下面每一則川普發言／美國消息翻譯成通順的繁體中文（台灣用語；常見名稱用台灣譯名，例如 Nvidia→輝達、Fed→聯準會），並判斷可能有關的台股。
 規則：
 - zh：完整翻出原文意思，不要省略或加油添醋；如果只是連結、影片、轉貼或沒有實質內容，寫「（影片／連結貼文）」再簡述。
-- stocks：0~4 檔最直接相關的台股，action 只能是「利多」或「利空」，reason 10~20 字說明關聯。跟台股沒關係就給空陣列，不要硬湊。
+- stocks：0~4 檔最直接相關的台股，action 只能是「利多」或「利空」，reason 10~20 字說明關聯，reason_en 是同一句的英文。跟台股沒關係就給空陣列，不要硬湊。
 - importance：1~5，對市場的影響程度（一般政治口水給 1）。
 - sentiment：對台股整體「利多／利空／中性」。
 $STOCK_RULE
-只輸出 JSON：{"items":[{"i":0,"zh":"","importance":1,"sentiment":"中性","stocks":[{"code":"2330","name":"台積電","action":"利多","reason":""}]}]}
+只輸出 JSON：{"items":[{"i":0,"zh":"","importance":1,"sentiment":"中性","stocks":[{"code":"2330","name":"台積電","action":"利多","reason":"","reason_en":""}]}]}
 每一則都要有，i 對應編號。
 
 $list
@@ -205,6 +210,7 @@ $lines
 只輸出 JSON：
 {"mood":"偏多/偏空/中性/震盪","mood_score":-5~5整數,"headline":"一句話總結今天最重要的事","events":[{"title":"事件(繁中)","impact":"對台股影響說明","sectors":["產業"]}],"buy":[{"code":"","name":"","action":"買進","confidence":0~100,"reason":""}],"sell":[{"code":"","name":"","action":"賣出","confidence":0~100,"reason":""}],"watch":[{"code":"","name":"","action":"觀望","confidence":0~100,"reason":""}],"advice":"今日操作建議與風險提醒（3~5句）"}
 events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。$STOCK_RULE
+另外請同時提供英文版：headline_en、advice_en，每個 event 加 title_en、impact_en，每檔股票加 reason_en。
 """.trimIndent()
     }
 
@@ -225,7 +231,7 @@ $usLines
 $twLines
 
 只輸出 JSON：
-{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}${langRule()}
 """.trimIndent()
     }
 }

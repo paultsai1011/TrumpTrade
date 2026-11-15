@@ -94,6 +94,37 @@ object StockMap {
 
     fun nameOf(code: String): String = names[code] ?: ""
 
+    val themeEn = mapOf(
+        "半導體" to "Semiconductors", "AI伺服器" to "AI Servers", "美中/出口管制" to "US-China / Export Controls",
+        "關稅/貿易" to "Tariffs / Trade", "台灣/兩岸" to "Taiwan / Cross-Strait", "蘋果供應鏈" to "Apple Supply Chain",
+        "電動車" to "EVs", "能源/電力" to "Energy / Power", "利率/金融" to "Rates / Financials", "國防軍工" to "Defense",
+        "航運" to "Shipping", "醫藥健保" to "Pharma / Healthcare", "鋼鐵原物料" to "Steel / Materials", "記憶體" to "Memory",
+        "網通衛星" to "Networking / Satellite", "民生消費" to "Consumer",
+    )
+
+    val enNames = mapOf(
+        "2330" to "TSMC", "2454" to "MediaTek", "2303" to "UMC", "3711" to "ASE Tech", "3443" to "GUC", "3661" to "Alchip",
+        "2317" to "Foxconn", "2382" to "Quanta", "3231" to "Wistron", "6669" to "Wiwynn", "2376" to "Gigabyte", "3017" to "AVC",
+        "2356" to "Inventec", "6488" to "GlobalWafers", "3034" to "Novatek", "4938" to "Pegatron", "2357" to "ASUS",
+        "1476" to "Eclat Textile", "9910" to "Feng Tay", "1590" to "AirTAC", "0050" to "Taiwan 50 ETF", "2634" to "AIDC",
+        "3008" to "Largan", "2474" to "Catcher", "3406" to "Genius Optical", "2308" to "Delta Electronics", "3665" to "BizLink",
+        "1536" to "Hota", "2201" to "Yulon Motor", "1504" to "TECO", "1519" to "Fortune Electric", "1503" to "Shihlin Electric",
+        "1513" to "Chung-Hsin Electric", "6505" to "Formosa Petrochemical", "2881" to "Fubon Financial", "2882" to "Cathay Financial",
+        "2891" to "CTBC Financial", "2886" to "Mega Financial", "00679B" to "US Treasury 20Y+ ETF", "8033" to "Thunder Tiger",
+        "2645" to "Evergreen Aviation", "3005" to "Getac", "2603" to "Evergreen Marine", "2609" to "Yang Ming", "2615" to "Wan Hai",
+        "1795" to "Lotus Pharma", "6446" to "PharmaEssentia", "4743" to "Oneness Biotech", "1760" to "Panion & BF Biotech",
+        "2002" to "China Steel", "2014" to "Chung Hung Steel", "2027" to "Ta Chen Stainless", "2408" to "Nanya Tech",
+        "2344" to "Winbond", "8299" to "Phison", "3260" to "ADATA", "2345" to "Accton", "3491" to "Universal Microwave",
+        "2314" to "MTI", "6285" to "WNC", "2912" to "President Chain Store", "1216" to "Uni-President", "9904" to "Pou Chen",
+        "2412" to "Chunghwa Telecom", "2379" to "Realtek", "2395" to "Advantech", "3037" to "Unimicron", "2327" to "Yageo",
+    )
+
+    /** 依目前語言顯示股票名稱 */
+    fun label(code: String, zhName: String): String =
+        if (Lang.en) enNames[code] ?: zhName.ifBlank { code } else zhName.ifBlank { nameOf(code) }
+
+    fun themeLabel(name: String): String = if (Lang.en) themeEn[name] ?: name else name
+
     fun match(text: String): List<Theme> = themes.filter { it.regex.containsMatchIn(text) }
 
     fun themesOfStock(code: String): List<Theme> = themes.filter { th -> th.stocks.any { it.first == code } }

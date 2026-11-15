@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        Lang.en = Store(this).english
         Notifier.createChannel(this)
         schedule(this)
     }
@@ -109,7 +110,7 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
 
         var aiUsed = 0
         for (item in hits) {
-            var title = "${if (item.cat == Cat.TRUMP) "🇺🇸 川普" else "📜 政策"}｜${item.source}"
+            var title = "${if (item.cat == Cat.TRUMP) tr("🇺🇸 川普", "🇺🇸 Trump") else tr("📜 政策", "📜 Policy")}｜${item.source}"
             var text = item.title.take(300)
             if (store.notifyAi && store.geminiKey.isNotBlank() && aiUsed < 2) {
                 try {
@@ -119,9 +120,9 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                     val a = parseAnalysis(o)
                     aiUsed++
                     if (a.importance <= 1) continue
-                    title = "${"★".repeat(a.importance)} ${a.sentiment}｜${item.source}"
-                    val picks = a.stocks.joinToString("、") { "${it.name}${it.code}(${it.action})" }
-                    text = a.summary + if (picks.isNotBlank()) "\n相關台股：$picks" else ""
+                    title = "${"★".repeat(a.importance)} ${term(a.sentiment)}｜${item.source}"
+                    val picks = a.stocks.joinToString(", ") { "${StockMap.label(it.code, it.name)} ${it.code}(${term(it.action)})" }
+                    text = a.summary + if (picks.isNotBlank()) tr("\n相關台股：", "\nTaiwan stocks: ") + picks else ""
                 } catch (_: Exception) {
                 }
             } else if (item.themes.isNotEmpty()) {

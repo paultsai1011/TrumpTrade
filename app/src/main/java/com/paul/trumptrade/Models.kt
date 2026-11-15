@@ -22,7 +22,10 @@ data class StockPick(
     val action: String,
     val confidence: Int,
     val reason: String,
-)
+    val reasonEn: String = "",
+) {
+    val reasonShown: String get() = if (Lang.en && reasonEn.isNotBlank()) reasonEn else reason
+}
 
 data class Analysis(
     val summary: String,
@@ -53,7 +56,7 @@ data class MarketQuote(val symbol: String, val label: String, val price: Double,
     val pct: Double get() = if (price > 0 && prev > 0) (price - prev) / prev * 100 else 0.0
 }
 
-data class BriefEvent(val title: String, val impact: String, val sectors: List<String>)
+data class BriefEvent(val title: String, val impact: String, val sectors: List<String>, val titleEn: String = "", val impactEn: String = "")
 
 data class Brief(
     val time: Long,
@@ -65,6 +68,8 @@ data class Brief(
     val sell: List<StockPick>,
     val watch: List<StockPick>,
     val advice: String,
+    val headlineEn: String = "",
+    val adviceEn: String = "",
 )
 
 data class StockAnalysis(
@@ -123,6 +128,7 @@ fun parsePicks(a: JSONArray?): List<StockPick> {
                 action = o.s("action", "觀望"),
                 confidence = o.n("confidence", 50).coerceIn(0, 100),
                 reason = o.s("reason"),
+                reasonEn = o.s("reason_en"),
             )
         )
     }
@@ -146,7 +152,7 @@ fun parseBrief(o: JSONObject): Brief {
     o.optJSONArray("events")?.let { a ->
         for (i in 0 until a.length()) {
             val e = a.optJSONObject(i) ?: continue
-            ev.add(BriefEvent(e.s("title"), e.s("impact"), e.strList("sectors")))
+            ev.add(BriefEvent(e.s("title"), e.s("impact"), e.strList("sectors"), e.s("title_en"), e.s("impact_en")))
         }
     }
     return Brief(
@@ -159,6 +165,8 @@ fun parseBrief(o: JSONObject): Brief {
         sell = parsePicks(o.optJSONArray("sell")),
         watch = parsePicks(o.optJSONArray("watch")),
         advice = o.s("advice"),
+        headlineEn = o.s("headline_en"),
+        adviceEn = o.s("advice_en"),
     )
 }
 
