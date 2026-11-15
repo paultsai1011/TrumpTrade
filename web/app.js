@@ -345,10 +345,23 @@ function pageFeed(cat) {
     <div class="row" style="margin:8px 0">
       <button class="toggle ${f.tw ? "on" : ""}" data-act="tw">只看有台股關聯</button><span class="grow"></span>
       ${S.key ? `<button class="btn ghost" data-act="translate" ${S.busy.tr ? "disabled" : ""}>🌐 翻譯成中文＋相關台股</button>` : ""}
-    </div>${progress("tr")}
+    </div>${progress("tr")}${legendHtml()}
     <div class="sub">共 ${list.length} 則 · 已翻譯 ${done} 則${!S.key && done < list.length ? " · 到 ⚙ 設定填入 Gemini Key 可翻譯其餘" : ""}</div>`;
   h += list.length ? list.map(newsCard).join("") : `<div class="sub" style="padding:20px">${S.loading ? "載入中…" : "目前沒有資料"}</div>`;
   return h;
+}
+
+function legendHtml() {
+  return `<details class="card legend"${LS.get("legendOpen", false) ? " open" : ""}>
+    <summary>ⓘ <span class="gold">★</span>=影響大小　<b class="up">利多</b>／<b class="down">利空</b>／<b class="gold">中性</b><span class="grow"></span><span style="color:var(--pri)">說明</span></summary>
+    <div style="margin-top:8px"><b>★ 星星：AI 判斷這則消息對市場的影響有多大</b>
+    <div class="sub">★ 影響很小（一般政治口水）　★★～★★★ 有點影響，值得留意　★★★★～★★★★★ 影響很大，相關股票可能明顯漲跌</div></div>
+    <div style="margin-top:8px"><b>右上角文字：對台股「整體」是好是壞</b>
+    <div class="sub">利多＝偏好消息　利空＝偏壞消息　中性＝沒有明顯好壞或方向不明　多空交雜＝有些公司受惠、有些受害</div></div>
+    <div style="margin-top:8px"><b>下方股票標籤：對「這一檔」的影響（漲紅跌綠）</b>
+    <div class="chips"><span class="chip up">可能受惠 利多</span><span class="chip down">可能受害 利空</span><span class="chip">有關但方向不明 觀望</span></div></div>
+    <div class="sub" style="margin-top:6px">點股票可看報價與 AI 買賣分析。以上皆為 AI 自動判斷，僅供參考，不構成投資建議。</div>
+  </details>`;
 }
 
 function pageNews(id) {
@@ -524,6 +537,7 @@ document.addEventListener("click", e => {
   else if (act === "clear") { S.localTr = {}; S.analyses = {}; S.stockAn = {}; S.localBrief = null; ["tr", "an", "san", "brief"].forEach(k => localStorage.removeItem("tt_" + k)); toast("已清除"); render(); }
   void cur;
 });
+document.addEventListener("toggle", e => { if (e.target.classList?.contains("legend")) LS.set("legendOpen", e.target.open); }, true);
 document.addEventListener("input", e => {
   if (e.target.id === "search") { S.filters[S.tab].q = e.target.value; render(); }
 });

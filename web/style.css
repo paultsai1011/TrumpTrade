@@ -82,3 +82,7 @@ hr { border: 0; border-top: 1px solid #2a2f36; margin: 10px 0; }
 #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(90px + env(safe-area-inset-bottom)); background: #e8eaed; color: #111;
   padding: 10px 16px; border-radius: 10px; z-index: 20; max-width: 90vw; font-size: 14px; box-shadow: 0 4px 16px #0008; }
 @media (min-width: 900px) { body { font-size: 16px; } }
+.legend summary { display: flex; align-items: center; gap: 4px; font-size: 13px; cursor: pointer; list-style: none; }
+.legend summary::-webkit-details-marker { display: none; }
+.legend[open] summary span[style] { visibility: hidden; }
+.legend { padding: 8px 12px; background: var(--card2); }

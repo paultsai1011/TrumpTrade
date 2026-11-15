@@ -510,13 +510,52 @@ fun FeedList(vm: MainViewModel, s: UiState, cat: Cat, onStock: (String) -> Unit,
                 }
             }
             if (s.batchRunning || s.translating) AiProgress(s)
-            Text("共 ${shown.size} 則 · 已翻譯 ${shown.count { it.id in s.translations }} 則", fontSize = 11.sp, color = Neutral)
+            Legend()
+            Text("共 ${shown.size} 則 · 已翻譯 ${shown.count { it.id in s.translations }} 則", fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 6.dp))
         }
         if (shown.isEmpty()) item {
             Text(if (s.loading) "載入中…" else "目前沒有資料，請按右上角重新整理", color = Neutral, modifier = Modifier.padding(16.dp))
         }
         items(shown, key = { it.id }) { item ->
             NewsCard(item, s.analyses[item.id], item.id in s.analyzing, s.translations[item.id], onStock) { onOpen(item) }
+        }
+    }
+}
+
+@Composable
+fun Legend() {
+    var open by rememberSaveable { mutableStateOf(false) }
+    Card(onClick = { open = !open }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("ⓘ ", fontSize = 13.sp)
+                Text("★", color = Color(0xFFFFC107), fontSize = 12.sp)
+                Text("=影響大小　", fontSize = 12.sp)
+                Text("利多", color = UpRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("／", fontSize = 12.sp)
+                Text("利空", color = DownGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("／", fontSize = 12.sp)
+                Text("中性", color = Color(0xFFFFB74D), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text(if (open) "收起 ▲" else "說明 ▼", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            }
+            if (open) {
+                Spacer(Modifier.height(6.dp))
+                Text("★ 星星：AI 判斷這則消息對市場的影響有多大", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("★ 影響很小（一般政治口水）　★★～★★★ 有點影響，值得留意　★★★★～★★★★★ 影響很大，相關股票可能明顯漲跌", fontSize = 12.sp, color = Neutral)
+                Spacer(Modifier.height(6.dp))
+                Text("右上角文字：對台股「整體」是好是壞", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("利多＝偏好消息　利空＝偏壞消息　中性＝沒有明顯好壞或方向不明　多空交雜＝有些公司受惠、有些受害", fontSize = 12.sp, color = Neutral)
+                Spacer(Modifier.height(6.dp))
+                Text("下方股票標籤：對「這一檔」的影響（漲紅跌綠）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.padding(vertical = 2.dp)) {
+                    Tag("可能受惠 利多", UpRed.copy(alpha = 0.18f), UpRed)
+                    Tag("可能受害 利空", DownGreen.copy(alpha = 0.18f), DownGreen)
+                    Tag("有關但方向不明 觀望", Neutral.copy(alpha = 0.18f), Neutral)
+                }
+                Text("點股票可看報價與 AI 買賣分析。以上皆為 AI 自動判斷，僅供參考，不構成投資建議。", fontSize = 11.sp, color = Neutral, modifier = Modifier.padding(top = 4.dp))
+            }
         }
     }
 }
