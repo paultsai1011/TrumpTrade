@@ -72,7 +72,6 @@ const SOURCES = [
   ["CNBC", "NEWS", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "rss"],
   ["CNBC Tech", "NEWS", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910", "rss"],
   ["MarketWatch", "NEWS", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "rss"],
-  ["Yahoo Finance", "NEWS", "https://finance.yahoo.com/news/rssindex", "rss"],
   ["白宮總統文件", "POLICY", `${FR}&conditions%5Btype%5D%5B%5D=PRESDOCU`, "fr"],
   ["商務部/USTR", "POLICY", `${FR}&conditions%5Bagencies%5D%5B%5D=industry-and-security-bureau&conditions%5Bagencies%5D%5B%5D=trade-representative-office-of-united-states`, "fr"],
   ["Google News", "POLICY", gnews("(Congress OR Senate OR House) (bill OR act OR legislation) (tech OR chips OR tariff OR tax OR AI OR crypto OR healthcare OR energy) when:3d"), "rss"],
@@ -121,16 +120,52 @@ async function fetchSource([name, cat, url, kind]) {
 }
 
 // ---------- 市場指數 / 台股報價 ----------
-const MARKETS = [["^GSPC", "S&P500"], ["^IXIC", "那斯達克"], ["^SOX", "費城半導體"], ["TSM", "台積電ADR"], ["^TWII", "台股加權"], ["^VIX", "恐慌指數"], ["TWD=X", "美元/台幣"]];
-async function fetchMarkets() {
-  const res = await Promise.all(MARKETS.map(async ([sym, label]) => {
+const MARKETS = [["^GSPC", "S&P500", ".SPX"], ["^IXIC", "那斯達克", ".IXIC"], ["^SOX", "費城半導體", ".SOX"], ["TSM", "台積電ADR", "TSM"],
+  ["^TWII", "台股加權", null], ["^VIX", "恐慌指數", ".VIX"], ["TWD=X", "美元/台幣", "TWD="]];
+async function yahoo(sym) {
+  for (const host of ["query1", "query2"]) {
     try {
-      const o = JSON.parse(await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`));
+      const o = JSON.parse(await get(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`));
       const m = o.chart.result[0].meta;
-      return { symbol: sym, label, price: m.regularMarketPrice || 0, prev: m.chartPreviousClose || m.previousClose || 0 };
-    } catch { return null; }
-  }));
-  return res.filter(Boolean);
+      if (m.regularMarketPrice) return { price: m.regularMarketPrice, prev: m.chartPreviousClose || m.previousClose || 0 };
+    } catch (e) { log("Yahoo", host, sym, e.message); }
+  }
+  return null;
+}
+async function cnbc(symbols) {
+  const out = {};
+  try {
+    const url = `https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols=${encodeURIComponent(symbols.join("|"))}&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json`;
+    const o = JSON.parse(await get(url));
+    let q = o?.FormattedQuoteResult?.FormattedQuote || [];
+    if (!Array.isArray(q)) q = [q];
+    for (const x of q) {
+      const n = v => parseFloat(String(v ?? "").replace(/[,%+]/g, "")) || 0;
+      const price = n(x.last), prev = n(x.previous_day_closing) || (price - n(x.change));
+      if (price) out[x.symbol] = { price, prev };
+    }
+  } catch (e) { log("CNBC 報價失敗", e.message); }
+  return out;
+}
+async function twii() {
+  try {
+    const o = JSON.parse(await get(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0&_=${Date.now()}`,
+      { headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" } }));
+    const m = (o.msgArray || [])[0];
+    if (m) { const price = num(m.z) || num(m.o), prev = num(m.y); if (price) return { price, prev }; }
+  } catch (e) { log("加權指數失敗", e.message); }
+  return null;
+}
+async function fetchMarkets() {
+  const res = {};
+  await Promise.all(MARKETS.map(async ([sym]) => { const r = await yahoo(sym); if (r) res[sym] = r; }));
+  const miss = MARKETS.filter(([sym, , c]) => !res[sym] && c);
+  if (miss.length) {
+    const c = await cnbc(miss.map(m => m[2]));
+    for (const [sym, , cs] of miss) if (c[cs]) res[sym] = c[cs];
+  }
+  if (!res["^TWII"]) { const t = await twii(); if (t) res["^TWII"] = t; }
+  return MARKETS.filter(([sym]) => res[sym]).map(([sym, label]) => ({ symbol: sym, label, price: res[sym].price, prev: res[sym].prev }));
 }
 
 const num = s => { if (!s || s === "-") return 0; const v = parseFloat(String(s).split("_").find(x => x) || ""); return isNaN(v) ? 0 : v; };
@@ -199,7 +234,7 @@ async function gen(model, prompt, useThink = true) {
     const r = JSON.parse(await get(`${BASE}/models/${model}:generateContent`, {
       method: "POST", headers: { "x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: gc }),
-    }, 90000));
+    }, 50000));
     const parts = r.candidates?.[0]?.content?.parts || [];
     return parts.filter(p => !p.thought).map(p => p.text || "").join("");
   } catch (e) {
@@ -211,11 +246,13 @@ function extractJson(t) {
   const s = t.replace(/```json|```/g, ""); const a = s.indexOf("{"), b = s.lastIndexOf("}");
   return JSON.parse(s.slice(a, b + 1));
 }
+let LAST_OK = "";
 async function ask(prompt) {
   MODELS = MODELS || await rankModels();
+  if (LAST_OK && MODELS.includes(LAST_OK)) MODELS = [LAST_OK, ...MODELS.filter(m => m !== LAST_OK)];
   let last;
   for (const m of MODELS.slice(0, 3)) {
-    try { const o = extractJson(await gen(m, prompt)); log("AI OK", m); return o; }
+    try { const o = extractJson(await gen(m, prompt)); log("AI OK", m); LAST_OK = m; return o; }
     catch (e) { last = e; log("AI 失敗", m, e.message); if (e.status === 400 && /API key/i.test(e.body || "")) break; }
   }
   throw last;
@@ -274,6 +311,7 @@ async function main() {
   const prevTr = {};
   for (const it of prev.items || []) if (it.tr) prevTr[it.id] = it.tr;
   Object.assign(prevTr, prev.extraTr || {});
+  LAST_OK = prev.lastModel || "";
 
   const results = await Promise.all(SOURCES.map(async s => {
     try { const r = await fetchSource(s); log(`${s[0]}(${s[1]}) ${r.length} 則`); return r; }
@@ -345,7 +383,7 @@ async function main() {
   for (const [k, v] of Object.entries(prevTr)) if (!live.has(k) && Date.now() - (v.t || 0) < 3 * 86400_000) extraTr[k] = v;
 
   mkdirSync("web/data", { recursive: true });
-  const data = { updated: Date.now(), items, markets, quotes: Object.keys(quotes).length ? quotes : (prev.quotes || {}), brief, errors, aiNote, extraTr };
+  const data = { updated: Date.now(), items, markets, quotes: Object.keys(quotes).length ? quotes : (prev.quotes || {}), brief, errors, aiNote, extraTr, lastModel: LAST_OK };
   writeFileSync("web/data/data.json", JSON.stringify(data));
   log("完成：", items.length, "則，", errors.length, "個來源失敗", aiNote);
 }
