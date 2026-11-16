@@ -1,6 +1,7 @@
 // 雲端資料抓取：GitHub Actions 每 20 分鐘執行，輸出 web/data/data.json 給網頁版使用
 import { writeFileSync, mkdirSync } from "node:fs";
 import { matchThemes, THEMES, STOCK_NAMES, DEFAULT_WATCH, themeByName } from "../web/themes.js";
+import { updateChips } from "./chips.mjs";
 
 const PAGES = "https://paultsai1011.github.io/TrumpTrade/data/data.json";
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
@@ -181,8 +182,10 @@ async function fetchQuotes(codes) {
       for (const m of o.msgArray || []) {
         if (!m.c) continue;
         const prev = num(m.y);
-        const price = num(m.z) || num(m.b) || num(m.a) || num(m.o) || prev;
-        out[m.c] = { name: m.n || STOCK_NAMES[m.c] || "", price, prev, time: m.t || "" };
+        const price = num(m.z) || num(m.trade?.z) || num(m.b) || num(m.a) || num(m.o) || prev;
+        const arr = s => String(s || "").split("_").filter(x => x !== "").map(x => parseFloat(x) || 0);
+        out[m.c] = { name: m.n || STOCK_NAMES[m.c] || "", price, prev, time: m.t || "", vol: parseInt(m.v) || 0,
+          ap: arr(m.a), av: arr(m.f), bp: arr(m.b), bv: arr(m.g), hi: num(m.h), lo: num(m.l), op: num(m.o) };
       }
     } catch (e) { log("mis 失敗", e.message); }
   }
@@ -313,6 +316,7 @@ function normPicks(arr, def) {
 
 // ---------- 主流程 ----------
 async function main() {
+  const chipsP = updateChips().catch(e => log("籌碼更新失敗", e.message));
   let prev = {};
   try { prev = JSON.parse(await get(`${PAGES}?t=${Date.now()}`)); log("讀到上一版資料", prev.items?.length); } catch { log("沒有上一版資料（第一次執行）"); }
   const prevTr = {};
@@ -419,6 +423,7 @@ ${JSON.stringify(src)}`, true);
   const live = new Set(items.map(i => i.id));
   for (const [k, v] of Object.entries(prevTr)) if (!live.has(k) && Date.now() - (v.t || 0) < 3 * 86400_000) extraTr[k] = v;
 
+  await chipsP;
   mkdirSync("web/data", { recursive: true });
   const data = { updated: Date.now(), items, markets, quotes: Object.keys(quotes).length ? quotes : (prev.quotes || {}), brief, errors, aiNote, extraTr, lastModel: LAST_OK, lastLite: LAST_LITE };
   writeFileSync("web/data/data.json", JSON.stringify(data));
