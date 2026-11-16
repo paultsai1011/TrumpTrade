@@ -233,7 +233,7 @@ events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。$STOCK_RULE
 """.trimIndent()
     }
 
-    fun stock(code: String, name: String, q: Quote?, themes: List<String>, us: List<NewsItem>, tw: List<NewsItem>): String {
+    fun stock(code: String, name: String, q: Quote?, themes: List<String>, us: List<NewsItem>, tw: List<NewsItem>, chips: String = ""): String {
         val price = if (q != null && q.price > 0) "現價 ${q.price}（${"%+.2f".format(q.pct)}%），昨收 ${q.prev}" else "報價暫無"
         val usLines = us.take(15).joinToString("\n") { "- [${fmt(it.time)}] ${it.title.take(180)}" }.ifBlank { "（無）" }
         val twLines = tw.take(12).joinToString("\n") { "- [${fmt(it.time)}] ${it.title.take(120)}" }.ifBlank { "（無）" }
@@ -242,6 +242,8 @@ events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。$STOCK_RULE
 現在時間：${now()}（台灣時間）
 $price
 所屬題材：${themes.joinToString("、").ifBlank { "未分類" }}
+籌碼面：
+${chips.ifBlank { "（無資料）" }}
 
 相關美國新聞／川普／政策：
 $usLines
@@ -250,7 +252,8 @@ $usLines
 $twLines
 
 只輸出 JSON：
-{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}${langRule()}
+請同時考慮消息面與籌碼面（法人動向、融資券、大戶持股變化、量能）。
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}${langRule()}
 """.trimIndent()
     }
 }

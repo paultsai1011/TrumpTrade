@@ -30,11 +30,17 @@ object TwQuote {
                     if (code.isBlank()) continue
                     val prev = d(m.s("y"))
                     var price = d(m.s("z"))
+                    if (price <= 0) price = d(m.optJSONObject("trade")?.s("z"))
                     if (price <= 0) price = d(m.s("b"))
                     if (price <= 0) price = d(m.s("a"))
                     if (price <= 0) price = d(m.s("o"))
                     if (price <= 0) price = prev
-                    out[code] = Quote(code, m.s("n").ifBlank { StockMap.nameOf(code) }, price, prev, m.s("t"))
+                    fun nums(k: String) = m.s(k).split("_").filter { it.isNotBlank() }.map { it.toDoubleOrNull() ?: 0.0 }
+                    out[code] = Quote(
+                        code, m.s("n").ifBlank { StockMap.nameOf(code) }, price, prev, m.s("t"),
+                        vol = m.s("v").toIntOrNull() ?: 0, askP = nums("a"), askV = nums("f").map { it.toInt() },
+                        bidP = nums("b"), bidV = nums("g").map { it.toInt() },
+                    )
                 }
             } catch (_: Exception) {
             }
@@ -98,5 +104,21 @@ object Markets {
                 }
             }
         }.awaitAll().filterNotNull()
+    }
+}
+
+/** 籌碼資料（雲端每天整理好，依代號第一碼分檔） */
+object Chips {
+    private val cache = HashMap<Char, Pair<Long, org.json.JSONObject>>()
+    fun get(code: String): ChipData? {
+        val k = code.firstOrNull() ?: return null
+        val now = System.currentTimeMillis()
+        val hit = cache[k]
+        val shard = if (hit != null && now - hit.first < 30 * 60_000L) hit.second else {
+            val o = org.json.JSONObject(Net.get("https://paultsai1011.github.io/TrumpTrade/data/chips/$k.json?t=${now / 600_000}", timeout = 30000))
+            cache[k] = now to o
+            o
+        }
+        return shard.optJSONObject(code)?.let { parseChips(it) }
     }
 }

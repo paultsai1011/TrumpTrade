@@ -36,6 +36,7 @@ data class UiState(
     val translations: Map<String, Translation> = emptyMap(),
     val translating: Boolean = false,
     val briefTranslating: Boolean = false,
+    val chips: Map<String, ChipData?> = emptyMap(),
     val updateDismissed: Boolean = false,
 )
 
@@ -313,6 +314,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return s.items.filter { it.id in byAi || it.themes.any { t -> t in themes } }.take(30)
     }
 
+    fun loadChips(code: String) {
+        viewModelScope.launch {
+            val c = withContext(Dispatchers.IO) { runCatching { Chips.get(code) }.getOrNull() }
+            upd { it.copy(chips = it.chips + (code to c)) }
+        }
+    }
+
+    /** 個股頁開著時，每 10 秒更新一次即時報價與五檔 */
+    fun liveQuote(code: String) {
+        viewModelScope.launch {
+            val q = withContext(Dispatchers.IO) { runCatching { TwQuote.fetch(listOf(code)) }.getOrDefault(emptyMap()) }
+            if (q.isNotEmpty()) upd { it.copy(quotes = it.quotes + q) }
+        }
+    }
+
     fun loadStockNews(code: String) {
         viewModelScope.launch {
             val name = nameOf(code)
@@ -338,7 +354,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 fetched
             }
             val themes = StockMap.themesOfStock(code).map { it.name }
-            val prompt = Prompts.stock(code, name, q, themes, relatedUsNews(code), tw)
+            val chips = _s.value.chips[code] ?: withContext(Dispatchers.IO) { runCatching { Chips.get(code) }.getOrNull() }
+            val prompt = Prompts.stock(code, name, q, themes, relatedUsNews(code), tw, chipSummary(chips))
             val o = withContext(Dispatchers.IO) { Gemini.ask(store, prompt, onAi) }
             o.put("_t", System.currentTimeMillis()).put("_code", code).put("_name", name)
             withContext(Dispatchers.IO) { store.saveStockAnalysis(code, o) }

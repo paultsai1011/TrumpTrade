@@ -47,7 +47,11 @@ data class Translation(
     val time: Long,
 )
 
-data class Quote(val code: String, val name: String, val price: Double, val prev: Double, val time: String) {
+data class Quote(
+    val code: String, val name: String, val price: Double, val prev: Double, val time: String,
+    val vol: Int = 0, val askP: List<Double> = emptyList(), val askV: List<Int> = emptyList(),
+    val bidP: List<Double> = emptyList(), val bidV: List<Int> = emptyList(),
+) {
     val change: Double get() = if (price > 0 && prev > 0) price - prev else 0.0
     val pct: Double get() = if (price > 0 && prev > 0) (price - prev) / prev * 100 else 0.0
 }
@@ -84,6 +88,7 @@ data class StockAnalysis(
     val risks: List<String>,
     val catalysts: List<String>,
     val time: Long,
+    val chips: String = "",
 )
 
 // ---------- JSON helpers ----------
@@ -182,6 +187,7 @@ fun parseStockAnalysis(o: JSONObject): StockAnalysis = StockAnalysis(
     risks = o.strList("risks"),
     catalysts = o.strList("catalysts"),
     time = o.optLong("_t", System.currentTimeMillis()),
+    chips = o.s("chips"),
 )
 
 fun parseTranslation(o: JSONObject): Translation = Translation(
@@ -191,3 +197,64 @@ fun parseTranslation(o: JSONObject): Translation = Translation(
     stocks = parsePicks(o.optJSONArray("stocks")).map { it.copy(confidence = -1, action = it.action.ifBlank { "相關" }) },
     time = o.optLong("_t", System.currentTimeMillis()),
 )
+
+// ---------- 籌碼 ----------
+data class ChipDay(
+    val date: Int, val foreign: Int?, val trust: Int?, val dealer: Int?, val total: Int?,
+    val margin: Int?, val short: Int?, val vol: Int?, val close: Double?,
+)
+
+data class ChipDist(val date: Int, val holders: Int, val retail: Double, val big400: Double, val big1000: Double, val lv: List<Double>)
+data class ChipDistRow(val date: Int, val big1000: Double, val big400: Double, val retail: Double, val holders: Int)
+data class ChipData(val days: List<ChipDay>, val dist: ChipDist?, val distHist: List<ChipDistRow>) {
+    fun sum(k: Int, sel: (ChipDay) -> Int?): Int = days.takeLast(k).sumOf { sel(it) ?: 0 }
+}
+
+fun parseChips(o: JSONObject): ChipData {
+    fun JSONArray.intAt(i: Int): Int? = if (i >= length() || isNull(i)) null else optDouble(i).let { if (it.isNaN()) null else it.toInt() }
+    fun JSONArray.dblAt(i: Int): Double? = if (i >= length() || isNull(i)) null else optDouble(i).takeUnless { it.isNaN() }
+    val days = mutableListOf<ChipDay>()
+    o.optJSONArray("h")?.let { a ->
+        for (i in 0 until a.length()) {
+            val r = a.optJSONArray(i) ?: continue
+            days.add(ChipDay(r.optInt(0), r.intAt(1), r.intAt(2), r.intAt(3), r.intAt(4), r.intAt(5), r.intAt(6), r.intAt(7), r.dblAt(8)))
+        }
+    }
+    val dist = o.optJSONObject("dist")?.let { d ->
+        val lv = d.optJSONArray("lv")
+        ChipDist(
+            d.optInt("d"), d.optInt("holders"), d.optDouble("retail", 0.0), d.optDouble("big400", 0.0), d.optDouble("big1000", 0.0),
+            if (lv == null) emptyList() else (0 until lv.length()).map { lv.optDouble(it, 0.0) }
+        )
+    }
+    val dh = mutableListOf<ChipDistRow>()
+    o.optJSONArray("dh")?.let { a ->
+        for (i in 0 until a.length()) {
+            val r = a.optJSONArray(i) ?: continue
+            dh.add(ChipDistRow(r.optInt(0), r.optDouble(1, 0.0), r.optDouble(2, 0.0), r.optDouble(3, 0.0), r.optInt(4)))
+        }
+    }
+    return ChipData(days.sortedBy { it.date }, dist, dh.sortedBy { it.date })
+}
+
+fun chipSummary(c: ChipData?): String {
+    if (c == null) return ""
+    val parts = mutableListOf<String>()
+    val h = c.days
+    if (h.isNotEmpty()) {
+        parts.add("近5日法人買賣超(張)：外資 ${c.sum(5) { it.foreign }}、投信 ${c.sum(5) { it.trust }}、自營 ${c.sum(5) { it.dealer }}；近20日合計 ${c.sum(20) { it.total }}")
+        val m = h.filter { it.margin != null }
+        if (m.size >= 2) {
+            val l = m.last(); val p5 = m[maxOf(0, m.size - 6)]
+            parts.add("融資餘額 ${l.margin} 張（5日 ${(l.margin ?: 0) - (p5.margin ?: 0)}），融券餘額 ${l.short} 張（5日 ${(l.short ?: 0) - (p5.short ?: 0)}）")
+        }
+        val v = h.filter { it.vol != null }
+        if (v.isNotEmpty()) parts.add("5日均量 ${v.takeLast(5).sumOf { it.vol ?: 0 } / minOf(5, v.size)} 張、20日均量 ${v.takeLast(20).sumOf { it.vol ?: 0 } / minOf(20, v.size)} 張")
+    }
+    c.dist?.let { d ->
+        val pv = c.distHist.getOrNull(c.distHist.size - 2)
+        parts.add("集保(${d.date})：千張大戶 ${d.big1000}%" + (pv?.let { "（週變化 ${"%.2f".format(d.big1000 - it.big1000)}）" } ?: "") +
+                "、400張以上 ${d.big400}%、50張以下散戶 ${d.retail}%、股東 ${d.holders} 人")
+    }
+    return parts.joinToString("\n")
+}

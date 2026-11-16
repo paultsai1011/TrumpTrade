@@ -187,12 +187,15 @@ events 挑 3~6 件；buy/sell/watch 各 0~5 檔。${RULE}
 現在時間：${nowStr()}（台灣時間）
 ${q && q.price ? `現價 ${q.price}（${pct(q).toFixed(2)}%），昨收 ${q.prev}` : "報價暫無"}
 所屬題材：${themes.join("、") || "未分類"}
+籌碼面：
+${chipSummary(code) || "（無資料）"}
 
 相關美國新聞／川普／政策：
 ${news.slice(0, 15).map(it => `- [${fmt(it.time)}] ${(trOf(it)?.zh || it.title).slice(0, 180)}`).join("\n") || "（無）"}
 
 只輸出 JSON：
-{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"]}${langRule()}`,
+請同時考慮消息面與籌碼面（法人動向、融資券、大戶持股變化、量能）。
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"]}${langRule()}`,
 };
 
 async function job(key, fn) {
@@ -327,6 +330,109 @@ function legendHtml() {
     <div class="chips"><span class="chip up">${T("可能受惠 利多", "May benefit · Bullish")}</span><span class="chip down">${T("可能受害 利空", "May suffer · Bearish")}</span><span class="chip">${T("有關但方向不明 觀望", "Related, unclear · Hold")}</span></div></div>
     <div class="sub" style="margin-top:6px">${T("點股票可看報價與 AI 買賣分析。以上皆為 AI 自動判斷，僅供參考，不構成投資建議。", "Tap a stock for quotes and AI analysis. AI judgments only, not investment advice.")}</div>
   </details>`;
+}
+
+// ================= 籌碼 =================
+S.chips = {}; S.chipsLoading = {};
+async function loadChips(code) {
+  const k = code[0];
+  if (S.chips[k] || S.chipsLoading[k]) return;
+  S.chipsLoading[k] = true;
+  try { const r = await fetch(`data/chips/${k}.json?t=${Math.floor(Date.now() / 600000)}`); if (r.ok) S.chips[k] = await r.json(); else S.chips[k] = {}; }
+  catch { S.chips[k] = {}; }
+  S.chipsLoading[k] = false;
+  if (current()?.type === "stock") render();
+}
+const chipsOf = code => S.chips[code[0]]?.[code] || null;
+const LV = ["1-999股", "1-5張", "5-10張", "10-15張", "15-20張", "20-30張", "30-40張", "40-50張", "50-100張", "100-200張", "200-400張", "400-600張", "600-800張", "800-1000張", "1000張+"];
+const LV_EN = ["<1 lot", "1-5", "5-10", "10-15", "15-20", "20-30", "30-40", "40-50", "50-100", "100-200", "200-400", "400-600", "600-800", "800-1000", "1000+"];
+const fmtN = v => v == null ? "–" : (v > 0 ? "+" : "") + v.toLocaleString("en-US");
+const sumN = (rows, i, k) => rows.slice(-k).reduce((a, r) => a + (r[i] || 0), 0);
+const md = d => { const s = String(d); return `${s.slice(4, 6)}/${s.slice(6)}`; };
+function bars(vals, opt = {}) {
+  const w = 300, h = opt.h || 70, n = vals.length || 1, bw = w / n;
+  if (opt.trend) { const lo = Math.min(...vals), hi = Math.max(...vals); vals = vals.map(v => hi > lo ? 0.15 + (v - lo) / (hi - lo) : 1); }
+  const max = Math.max(1e-9, ...vals.map(v => Math.abs(v || 0)));
+  const signed = vals.some(v => v < 0);
+  const mid = signed ? h / 2 : h;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="display:block">` + vals.map((v, i) => {
+    const bh = Math.abs(v || 0) / max * (signed ? h / 2 - 2 : h - 2);
+    const y = v >= 0 ? mid - bh : mid;
+    const col = opt.color || (v >= 0 ? "var(--up)" : "var(--down)");
+    return `<rect x="${i * bw + 1}" y="${y}" width="${Math.max(1, bw - 2)}" height="${bh}" fill="${col}" rx="1"/>`;
+  }).join("") + (signed ? `<line x1="0" x2="${w}" y1="${mid}" y2="${mid}" stroke="#3a414a"/>` : "") + `</svg>`;
+}
+function chipSummary(code) {
+  const c = chipsOf(code); if (!c) return "";
+  const h = c.h || [], parts = [];
+  if (h.length) {
+    parts.push(`近5日法人買賣超(張)：外資 ${fmtN(sumN(h, 1, 5))}、投信 ${fmtN(sumN(h, 2, 5))}、自營 ${fmtN(sumN(h, 3, 5))}；近20日合計 ${fmtN(sumN(h, 4, 20))}`);
+    const l = h[h.length - 1], p5 = h[Math.max(0, h.length - 6)];
+    if (l[5] != null && p5[5] != null) parts.push(`融資餘額 ${l[5]} 張（5日 ${fmtN(l[5] - p5[5])}），融券餘額 ${l[6]} 張（5日 ${fmtN(l[6] - p5[6])}）`);
+    const v5 = sumN(h, 7, 5) / 5, v20 = sumN(h, 7, 20) / Math.min(20, h.length);
+    if (v20) parts.push(`5日均量 ${Math.round(v5)} 張、20日均量 ${Math.round(v20)} 張`);
+  }
+  if (c.dist) {
+    const dh = c.dh || [], pv = dh.length > 1 ? dh[dh.length - 2] : null;
+    parts.push(`集保(${c.dist.d})：千張大戶 ${c.dist.big1000}%${pv ? `（週變化 ${(c.dist.big1000 - pv[1]).toFixed(2)}）` : ""}、400張以上 ${c.dist.big400}%、50張以下散戶 ${c.dist.retail}%、股東 ${c.dist.holders} 人`);
+  }
+  return parts.join("\n");
+}
+function chipsHtml(code) {
+  const q = S.data.quotes[code];
+  let h = "";
+  // 五檔
+  if (q?.bp?.length || q?.ap?.length) {
+    const rows = Array.from({ length: 5 }, (_, i) => `<tr><td class="up">${q.bv?.[i] ?? ""}</td><td class="up">${q.bp?.[i] ? q.bp[i].toFixed(2) : ""}</td><td class="down">${q.ap?.[i] ? q.ap[i].toFixed(2) : ""}</td><td class="down">${q.av?.[i] ?? ""}</td></tr>`).join("");
+    const bs = (q.bv || []).reduce((a, b) => a + b, 0), as = (q.av || []).reduce((a, b) => a + b, 0);
+    h += `<div class="card"><div class="row"><b class="grow">${T("📊 五檔買賣量", "📊 Order book (top 5)")}</b><span class="sub">${T("成交量", "Volume")} ${(q.vol || 0).toLocaleString()} ${T("張", "lots")}</span></div>
+      <table class="tbl"><tr><th>${T("委買量", "Bid qty")}</th><th>${T("委買價", "Bid")}</th><th>${T("委賣價", "Ask")}</th><th>${T("委賣量", "Ask qty")}</th></tr>${rows}</table>
+      <div class="sub">${T("五檔合計", "Top-5 total")}：<span class="up">${T("買", "bid")} ${bs}</span> / <span class="down">${T("賣", "ask")} ${as}</span> ${T("張", "lots")} · ${T("雲端約 20 分鐘更新，App 版為即時", "Cloud ~20 min delay; the app is live")}</div></div>`;
+  }
+  const c = chipsOf(code);
+  if (!c) { loadChips(code); return h + `<div class="card sub">${S.chipsLoading[code[0]] === false && S.chips[code[0]] ? T("這檔暫無籌碼資料", "No chip data for this stock") : T("籌碼資料載入中…", "Loading chip data…")}</div>`; }
+  const rows = c.h || [];
+  if (rows.length) {
+    const last = rows.slice(-10).reverse();
+    h += `<div class="card"><b>${T("🏦 三大法人買賣超（張）", "🏦 Institutional net buy/sell (lots)")}</b>
+      <div class="row" style="margin:6px 0;gap:14px">${[[1, T("外資", "Foreign")], [2, T("投信", "Trust")], [3, T("自營", "Dealer")]].map(([i, l]) => `<span class="sub">${l} 5${T("日", "d")} <b class="${cls(sumN(rows, i, 5))}">${fmtN(sumN(rows, i, 5))}</b></span>`).join("")}
+      <span class="sub">20${T("日合計", "d total")} <b class="${cls(sumN(rows, 4, 20))}">${fmtN(sumN(rows, 4, 20))}</b></span></div>
+      ${bars(rows.slice(-20).map(r => r[4] || 0))}
+      <table class="tbl"><tr><th>${T("日期", "Date")}</th><th>${T("外資", "Foreign")}</th><th>${T("投信", "Trust")}</th><th>${T("自營", "Dealer")}</th><th>${T("合計", "Total")}</th></tr>
+      ${last.map(r => `<tr><td>${md(r[0])}</td>${[1, 2, 3, 4].map(i => `<td class="${cls(r[i] || 0)}">${fmtN(r[i])}</td>`).join("")}</tr>`).join("")}</table></div>`;
+    const m = rows.filter(r => r[5] != null);
+    if (m.length) {
+      const l = m[m.length - 1], p1 = m[m.length - 2], p5 = m[Math.max(0, m.length - 6)];
+      h += `<div class="card"><b>${T("💳 融資融券（張）", "💳 Margin / short (lots)")}</b>
+        <table class="tbl"><tr><th></th><th>${T("餘額", "Balance")}</th><th>${T("單日", "1d")}</th><th>${T("5日", "5d")}</th></tr>
+        <tr><td>${T("融資", "Margin")}</td><td>${l[5].toLocaleString()}</td><td class="${cls(p1 ? l[5] - p1[5] : 0)}">${p1 ? fmtN(l[5] - p1[5]) : "–"}</td><td class="${cls(l[5] - p5[5])}">${fmtN(l[5] - p5[5])}</td></tr>
+        <tr><td>${T("融券", "Short")}</td><td>${l[6].toLocaleString()}</td><td class="${cls(p1 ? l[6] - p1[6] : 0)}">${p1 ? fmtN(l[6] - p1[6]) : "–"}</td><td class="${cls(l[6] - p5[6])}">${fmtN(l[6] - p5[6])}</td></tr></table>
+        <div class="sub">${T("融資增加＝散戶借錢買進變多；融券增加＝放空變多", "Margin up = more leveraged retail buying; short up = more short selling")}（${md(l[0])}）</div></div>`;
+    }
+    const v = rows.filter(r => r[7] != null);
+    if (v.length) {
+      const v5 = Math.round(sumN(v, 7, 5) / Math.min(5, v.length)), v20 = Math.round(sumN(v, 7, 20) / Math.min(20, v.length));
+      h += `<div class="card"><div class="row"><b class="grow">${T("📈 成交量（張）", "📈 Volume (lots)")}</b><span class="sub">5${T("日均", "d avg")} ${v5.toLocaleString()} · 20${T("日均", "d avg")} ${v20.toLocaleString()}</span></div>
+        ${bars(v.slice(-20).map(r => r[7] || 0), { color: "var(--pri)" })}
+        <div class="sub">${v5 > v20 * 1.3 ? T("近期明顯放量", "Volume picking up") : v5 < v20 * 0.7 ? T("近期量縮", "Volume shrinking") : T("量能持平", "Volume steady")} · ${md(v[0][0])}–${md(v[v.length - 1][0])}</div></div>`;
+    }
+  }
+  if (c.dist) {
+    const d = c.dist, dh = c.dh || [], pv = dh.length > 1 ? dh[dh.length - 2] : null;
+    const chg = (a, b) => b == null ? "" : ` <span class="${cls(a - b)}">(${a - b >= 0 ? "+" : ""}${(a - b).toFixed(2)})</span>`;
+    const max = Math.max(1, ...d.lv);
+    h += `<div class="card"><b>${T("👥 籌碼分佈（集保股權分散）", "👥 Shareholder distribution (TDCC)")}</b> <span class="sub">${md(d.d)}</span>
+      <div class="row" style="margin:8px 0;gap:16px">
+        <div><div class="sub">${T("千張大戶", "1000+ lots")}</div><b style="font-size:18px">${d.big1000}%</b>${chg(d.big1000, pv?.[1])}</div>
+        <div><div class="sub">${T("400張以上", "400+ lots")}</div><b style="font-size:18px">${d.big400}%</b>${chg(d.big400, pv?.[2])}</div>
+        <div><div class="sub">${T("50張以下散戶", "Retail ≤50 lots")}</div><b style="font-size:18px">${d.retail}%</b>${chg(d.retail, pv?.[3])}</div>
+        <div><div class="sub">${T("股東人數", "Holders")}</div><b style="font-size:18px">${d.holders.toLocaleString()}</b>${pv ? ` <span class="${cls(d.holders - pv[4])}">(${d.holders - pv[4] >= 0 ? "+" : ""}${(d.holders - pv[4]).toLocaleString()})</span>` : ""}</div>
+      </div>
+      ${d.lv.map((p, i) => `<div class="lvrow"><span>${S.en ? LV_EN[i] : LV[i]}</span><div class="lvbar"><i style="width:${p / max * 100}%;background:${i >= 11 ? "var(--up)" : i <= 7 ? "var(--down)" : "var(--pri)"}"></i></div><span>${p.toFixed(2)}%</span></div>`).join("")}
+      ${dh.length > 2 ? `<div class="sub" style="margin-top:8px">${T("千張大戶持股走勢", "1000+ lot holders trend")}（${dh.length}${T("週", "w")}）</div>${bars(dh.map(r => r[1]), { color: "var(--gold)", h: 50, trend: true })}` : ""}
+      <div class="sub" style="margin-top:6px">${T("大戶比例上升、股東人數減少＝籌碼集中，通常較健康；反之為籌碼分散。", "Big holders up + fewer holders = concentrating (usually healthier); the opposite = dispersing.")}</div></div>`;
+  }
+  return h;
 }
 
 // ================= 頁面 =================
@@ -464,11 +570,13 @@ function pageStock(code) {
       <button class="btn ghost" data-act="watch" data-code="${esc(code)}">${inW ? T("移除自選", "Remove from watchlist") : T("加入自選", "Add to watchlist")}</button>
       <a class="btn ghost" href="https://tw.stock.yahoo.com/quote/${encodeURIComponent(code)}" target="_blank" rel="noopener">Yahoo</a>
     </div>${progress("s:" + code)}`;
+  h += chipsHtml(code);
   if (!S.key) h += `<div class="sub">${T("到 ⚙ 設定填入 Gemini Key 可以用 AI 分析這檔股票。", "Add a Gemini key in ⚙ Settings to analyze this stock with AI.")}</div>`;
   if (sa) {
     const list = (t, arr) => arr?.length ? `<h3>${t}</h3>` + arr.map(x => `<div>• ${esc(typeof x === "string" ? x : JSON.stringify(x))}</div>`).join("") : "";
     h += `<div class="card"><div class="row"><b class="grow">${T("🤖 AI 建議", "🤖 AI view")}</b><span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span></div>
       <div style="margin-top:6px">${esc(sa.summary || "")}</div>
+      ${sa.chips ? `<h3>${T("籌碼面", "Chips")}</h3><div>${esc(sa.chips)}</div>` : ""}
       ${sa.short_term ? `<h3>${T("短線（1~2週）", "Short term (1–2 weeks)")}</h3><div>${esc(sa.short_term)}</div>` : ""}${sa.mid_term ? `<h3>${T("中線（1~3個月）", "Mid term (1–3 months)")}</h3><div>${esc(sa.mid_term)}</div>` : ""}
       ${list(T("理由", "Reasons"), sa.reasons)}${list(T("⚠️ 風險", "⚠️ Risks"), sa.risks)}${list(T("👀 接下來觀察", "👀 What to watch"), sa.catalysts)}
       <div class="sub" style="margin-top:8px">${T("分析時間 ", "Analyzed ")}${full(sa.t)}</div></div>`;

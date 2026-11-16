@@ -765,6 +765,11 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
     LaunchedEffect(code) {
         vm.refreshQuotes(listOf(code))
         if (s.stockNews[code] == null) vm.loadStockNews(code)
+        vm.loadChips(code)
+        while (true) {
+            kotlinx.coroutines.delay(10_000)
+            vm.liveQuote(code)
+        }
     }
     val uri = LocalUriHandler.current
     val q = s.quotes[code]
@@ -793,6 +798,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
             }
             if (busy) AiProgress(s)
         }
+        item { Column { ChipsSection(q, s.chips[code], s.chips.containsKey(code)) } }
         if (sa != null) item {
             Card {
                 Column(Modifier.padding(12.dp)) {
@@ -801,6 +807,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
                         ActionBadge(sa.action, sa.confidence)
                     }
                     Text(sa.summary, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                    if (sa.chips.isNotBlank()) { SectionTitle(tr("籌碼面", "Chips")); Text(sa.chips, fontSize = 14.sp) }
                     if (sa.shortTerm.isNotBlank()) { SectionTitle(tr("短線（1~2週）", "Short term (1–2 weeks)")); Text(sa.shortTerm, fontSize = 14.sp) }
                     if (sa.midTerm.isNotBlank()) { SectionTitle(tr("中線（1~3個月）", "Mid term (1–3 months)")); Text(sa.midTerm, fontSize = 14.sp) }
                     if (sa.reasons.isNotEmpty()) { SectionTitle(tr("理由", "Reasons")); sa.reasons.forEach { Text("• $it", fontSize = 13.sp) } }
