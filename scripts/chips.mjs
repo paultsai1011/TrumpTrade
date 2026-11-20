@@ -6,7 +6,7 @@ const PAGES = "https://paultsai1011.github.io/TrumpTrade/data/chips";
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
 const log = (...a) => console.log("[籌碼]", ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const KEEP_DAYS = 30, KEEP_WEEKS = 12;
+const KEEP_DAYS = 30, KEEP_WEEKS = 12, K_DAYS = 130, K_WEEKDAYS = 140, K_BUDGET = 15;
 
 async function getText(url, timeout = 30000) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeout);
@@ -80,17 +80,18 @@ async function volume(d) {
   if (t.stat && t.stat !== "OK") return null;
   const tb = (t.tables || []).find(x => (x.fields || []).includes("證券代號") && (x.fields || []).includes("成交股數"));
   if (!tb) return null;
-  const f = tb.fields, iC = f.indexOf("證券代號"), iV = f.indexOf("成交股數"), iP = f.indexOf("收盤價");
+  const f = tb.fields, iC = f.indexOf("證券代號"), iV = f.indexOf("成交股數"), iP = f.indexOf("收盤價"),
+    iO = f.indexOf("開盤價"), iH = f.indexOf("最高價"), iL = f.indexOf("最低價");
   for (const r of tb.data || []) {
     const c = String(r[iC]).trim(); if (!okCode(c)) continue;
-    out[c] = [lots(r[iV]), n(r[iP])];
+    out[c] = [lots(r[iV]), n(r[iP]), n(r[iO]), n(r[iH]), n(r[iL])];
   }
   await sleep(2500);
   try {
     const o = await getJson(`https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${slash(d)}&type=EW&response=json`);
     for (const r of o.tables?.[0]?.data || []) {
       const c = String(r[0]).trim(); if (!okCode(c)) continue;
-      out[c] = [lots(r[7]), n(r[2])];
+      out[c] = [lots(r[7]), n(r[2]), n(r[4]), n(r[5]), n(r[6])];
     }
   } catch (e) { log("櫃買成交量失敗", d, e.message); }
   return out;
@@ -127,6 +128,23 @@ export async function updateChips() {
     try { Object.assign(store, await getJson(`${PAGES}/${i}.json?t=${Date.now()}`)); } catch { }
   }
   log("讀到上一版", Object.keys(store).length, "檔");
+  // K 線（日 OHLCV），欄位式儲存：{d:[], o:[], h:[], l:[], c:[], v:[]}
+  const kstore = {};
+  for (let i = 0; i <= 9; i++) {
+    try { Object.assign(kstore, await getJson(`${PAGES.replace("/chips", "/k")}/${i}.json?t=${Date.now()}`)); } catch { }
+  }
+  log("K線上一版", Object.keys(kstore).length, "檔");
+  const putK = (d, r) => {
+    for (const [c, v] of Object.entries(r)) {
+      const [vol, cl, op, hi, lo] = v;
+      if (!cl || cl <= 0) continue;                     // 沒成交的跳過
+      const k = kstore[c] || (kstore[c] = { d: [], o: [], h: [], l: [], c: [], v: [] });
+      const i = k.d.indexOf(+d);
+      const row = [+d, op || cl, hi || cl, lo || cl, cl, vol];
+      if (i >= 0) ["d", "o", "h", "l", "c", "v"].forEach((f, j) => k[f][i] = row[j]);
+      else ["d", "o", "h", "l", "c", "v"].forEach((f, j) => k[f].push(row[j]));
+    }
+  };
 
   const ensure = c => store[c] || (store[c] = { h: [], dist: null, dh: [] });
   const setDay = (c, d, idx, vals) => {
@@ -150,9 +168,9 @@ export async function updateChips() {
         for (const [c, v] of Object.entries(r)) setDay(c, d, 1, v);   // 1:外資 2:投信 3:自營 4:合計
         st.inst = 1; log("法人", d, Object.keys(r).length);
       }
-      if (!st.vol) {
+      if (!st.vol || !st.k) {
         const r = await volume(d); await sleep(2500);
-        if (r) { for (const [c, v] of Object.entries(r)) setDay(c, d, 7, v); st.vol = 1; log("成交量", d, Object.keys(r).length); }  // 7:量 8:收盤
+        if (r) { for (const [c, v] of Object.entries(r)) setDay(c, d, 7, v.slice(0, 2)); putK(d, r); st.vol = 1; st.k = 1; log("成交量/K線", d, Object.keys(r).length); }  // 7:量 8:收盤
       }
       if (!st.margin) {
         const r = await margin(d); await sleep(2500);
@@ -160,8 +178,23 @@ export async function updateChips() {
       }
     } catch (e) { log("失敗", d, e.message); await sleep(5000); }
   }
+  // K 線補歷史（只需要收盤行情，每次最多補 K_BUDGET 天）
+  const kdays = recentWeekdays(K_WEEKDAYS);
+  let kb = 0;
+  for (const d of kdays) {
+    if (kb >= K_BUDGET) break;
+    const st = meta.done[d] || (meta.done[d] = {});
+    if (st.holiday || st.k) continue;
+    try {
+      const r = await volume(d); await sleep(2500); kb++;
+      if (r === null) { if (d !== today) st.holiday = 1; continue; }
+      putK(d, r); st.k = 1;
+      if (days.includes(d)) { for (const [c, v] of Object.entries(r)) setDay(c, d, 7, v.slice(0, 2)); st.vol = 1; }
+      log("K線補", d, Object.keys(r).length);
+    } catch (e) { log("K線失敗", d, e.message); await sleep(5000); }
+  }
   // 清掉太舊的 done 紀錄
-  const keepSet = new Set(days);
+  const keepSet = new Set(kdays);
   for (const k of Object.keys(meta.done)) if (!keepSet.has(k)) delete meta.done[k];
 
   // 集保：每 12 小時檢查一次
@@ -191,6 +224,16 @@ export async function updateChips() {
   }
   mkdirSync("web/data/chips", { recursive: true });
   shards.forEach((sh, i) => writeFileSync(`web/data/chips/${i}.json`, JSON.stringify(sh)));
+  const kshards = Array.from({ length: 10 }, () => ({}));
+  for (const [c, k] of Object.entries(kstore)) {
+    const idx = k.d.map((d, i) => [d, i]).sort((a, b) => a[0] - b[0]).slice(-K_DAYS).map(x => x[1]);
+    const o = {}; ["d", "o", "h", "l", "c", "v"].forEach(f => o[f] = idx.map(i => k[f][i]));
+    const s0 = parseInt(c[0]); if (!isNaN(s0)) kshards[s0][c] = o;
+  }
+  mkdirSync("web/data/k", { recursive: true });
+  kshards.forEach((sh, i) => writeFileSync(`web/data/k/${i}.json`, JSON.stringify(sh)));
+  const kDays = Math.max(0, ...Object.values(kstore).map(k => k.d.length));
+  log("K線輸出", Object.keys(kstore).length, "檔，最多", kDays, "天");
   const lastDay = Math.max(0, ...Object.values(store).flatMap(s => s.h.map(r => r[0])));
   meta.updated = Date.now(); meta.lastDay = lastDay;
   writeFileSync("web/data/chips/meta.json", JSON.stringify(meta));
