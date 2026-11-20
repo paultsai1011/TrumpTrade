@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -444,6 +445,10 @@ fun BriefCard(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("🤖 AI 今日盤勢日報", "🤖 AI daily brief"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                val ctx = LocalContext.current
+                if (b != null) IconButton(onClick = { Share.send(ctx, Share.brief(b, s.quotes, s.markets)) }) {
+                    Icon(Icons.Filled.Share, tr("分享", "Share"), tint = MaterialTheme.colorScheme.primary)
+                }
                 if (s.briefLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Button(onClick = { vm.makeBrief() }) { Text(if (b == null) tr("產生", "Generate") else tr("更新", "Update")) }
             }
@@ -619,6 +624,10 @@ fun DetailScreen(vm: MainViewModel, s: UiState, news: NewsItem, onStock: (String
             }
             Row(Modifier.padding(top = 10.dp)) {
                 if (news.link.isNotBlank()) OutlinedButton(onClick = { runCatching { uri.openUri(news.link) } }) { Text(tr("開啟原文", "Open source")) }
+                val shareCtx = LocalContext.current
+                IconButton(onClick = { Share.send(shareCtx, Share.news(news, s.translations[news.id], a, s.quotes)) }) {
+                    Icon(Icons.Filled.Share, tr("分享", "Share"), tint = MaterialTheme.colorScheme.primary)
+                }
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { vm.analyze(news) }, enabled = !busy) { Text(if (a == null) tr("🤖 AI 分析影響", "🤖 AI impact analysis") else tr("重新分析", "Re-analyze")) }
             }
@@ -795,6 +804,11 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
                 OutlinedButton(onClick = { if (inWatch) vm.removeWatch(code) else vm.addWatch(code) }) { Text(if (inWatch) tr("移除自選", "Remove from watchlist") else tr("加入自選", "Add to watchlist")) }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { runCatching { uri.openUri("https://tw.stock.yahoo.com/quote/$code") } }) { Text(tr("Yahoo股市", "Yahoo")) }
+                Spacer(Modifier.width(8.dp))
+                val shareCtx = LocalContext.current
+                OutlinedButton(onClick = { Share.send(shareCtx, Share.stock(code, name, q, sa, s.chips[code])) }) {
+                    Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr("分享", "Share"))
+                }
             }
             if (busy) AiProgress(s)
         }

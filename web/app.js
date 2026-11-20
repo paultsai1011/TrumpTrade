@@ -305,6 +305,7 @@ function briefHtml() {
   const sb = S.data.brief, lb = S.localBrief;
   const b = lb && (!sb || (lb.t || 0) > (sb.t || 0)) ? lb : sb;
   let h = `<div class="card"><div class="row"><b class="grow" style="font-size:17px">${T("🤖 AI 今日盤勢日報", "🤖 AI daily brief")}</b>
+    ${b ? `<button class="btn ghost" data-act="share-brief">📤 ${T("分享", "Share")}</button>` : ""}
     ${S.key ? `<button class="btn" data-act="brief" ${S.busy.brief ? "disabled" : ""}>${b ? T("重新產生", "Regenerate") : T("產生", "Generate")}</button>` : ""}</div>${progress("brief")}`;
   if (!b) return h + `<div class="sub">${S.key ? T("按「產生」讓 AI 讀完最近的川普發言、政策與美股新聞，整理出台股可能的買進／賣出名單。", "Tap Generate: AI reads recent Trump remarks, policy and US market news and lists Taiwan stocks to buy / sell.") : T("雲端每 6 小時自動產生，或到 ⚙ 設定填入自己的 Key 立即產生。", "Generated in the cloud every 6 hours, or add your own key in ⚙ Settings.")}</div></div>`;
   h += `<div class="sub">${T("產生時間 ", "Generated ")}${full(b.t)}</div>
@@ -435,6 +436,56 @@ function chipsHtml(code) {
   return h;
 }
 
+// ================= 分享 =================
+const SITE = "https://paultsai1011.github.io/TrumpTrade/";
+const shareFooter = () => "\n" + T("⚠️ AI 自動分析，僅供參考，不構成投資建議", "⚠️ AI-generated, for reference only, not investment advice") + "\n👉 " + T("川普財經雷達", "Trump Market Radar") + " " + SITE;
+const qtxt = code => { const q = S.data.quotes[code]; return q && q.price ? ` ${q.price.toFixed(2)}（${pct(q) >= 0 ? "+" : ""}${pct(q).toFixed(2)}%）` : ""; };
+const mkLabel = m => S.en ? ({ "^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^SOX": "SOX", "TSM": "TSMC ADR", "^TWII": "TAIEX", "^VIX": "VIX", "TWD=X": "USD/TWD" }[m.symbol] || m.symbol) : m.label;
+function currentBrief() { const sb = S.data.brief, lb = S.localBrief; return lb && (!sb || (lb.t || 0) > (sb.t || 0)) ? lb : sb; }
+function shareBriefText() {
+  const b = currentBrief(); if (!b) return "";
+  const pk = arr => arr.map(p => `• ${stockLabel(p.code, p.name)} ${p.code}${qtxt(p.code)}${reasonOf(p) ? "：" + reasonOf(p) : ""}`).join("\n");
+  let t = `${T("📊 川普財經雷達｜AI 今日盤勢", "📊 Trump Market Radar | AI daily brief")}（${full(b.t)}）\n`;
+  if (S.data.markets.length) t += S.data.markets.slice(0, 5).map(m => `${mkLabel(m)} ${pct(m) >= 0 ? "+" : ""}${pct(m).toFixed(2)}%`).join("　") + "\n";
+  t += `${T("情緒：", "Mood: ")}${term(b.mood)}（${b.mood_score > 0 ? "+" : ""}${b.mood_score}）\n`;
+  if (pickEn(b, "headline")) t += `\n📌 ${pickEn(b, "headline")}\n`;
+  for (const e of (b.events || []).slice(0, 5)) t += `• ${pickEn(e, "title")}${pickEn(e, "impact") ? " — " + pickEn(e, "impact") : ""}\n`;
+  if (b.buy?.length) t += `\n${T("📈 可留意買進", "📈 Consider buying")}\n${pk(b.buy)}\n`;
+  if (b.sell?.length) t += `\n${T("📉 可考慮賣出／避開", "📉 Consider selling / avoid")}\n${pk(b.sell)}\n`;
+  if (b.watch?.length) t += `\n${T("👀 觀察名單", "👀 Watch")}\n${pk(b.watch)}\n`;
+  if (pickEn(b, "advice")) t += `\n💡 ${pickEn(b, "advice")}\n`;
+  return t.trimEnd() + "\n" + shareFooter();
+}
+function shareNewsText(id) {
+  const it = S.data.items.find(x => x.id === id); if (!it) return "";
+  const t = trOf(it), a = S.analyses[id];
+  let s2 = `${it.cat === "TRUMP" ? T("🇺🇸 川普動態", "🇺🇸 Trump") : catLabel(it.cat)}｜${it.source}　${full(it.time)}\n\n`;
+  s2 += t?.zh && !S.en ? `${t.zh}\n\n${T("原文：", "Original: ")}${it.title}\n` : `${it.title}\n`;
+  const imp = a?.importance || t?.importance, sen = a?.sentiment || t?.sentiment;
+  if (imp) s2 += `\n${T("影響：", "Impact: ")}${"★".repeat(imp)}${sen ? " " + term(sen) : ""}\n`;
+  if (a?.summary) s2 += `🤖 ${a.summary}\n`;
+  const ps = (t?.stocks?.length ? t.stocks : a?.stocks) || [];
+  if (ps.length) s2 += T("相關台股：", "Taiwan stocks: ") + ps.map(p => `${stockLabel(p.code, p.name)}${p.code}(${term(p.action)})`).join(S.en ? ", " : "、") + "\n";
+  if (it.link) s2 += `\n🔗 ${it.link}\n`;
+  return s2 + shareFooter();
+}
+function shareStockText(code) {
+  const sa = S.stockAn[code], c = chipsOf(code);
+  let s2 = `📈 ${stockLabel(code, nameOf(code))} ${code}${qtxt(code)}\n`;
+  if (c?.h?.length) s2 += `${T("法人5日：外資 ", "Institutions 5d: Foreign ")}${fmtN(sumN(c.h, 1, 5))}${T("、投信 ", ", Trust ")}${fmtN(sumN(c.h, 2, 5))}${T("、自營 ", ", Dealer ")}${fmtN(sumN(c.h, 3, 5))}${T(" 張", " lots")}\n`;
+  if (c?.dist) s2 += `${T("千張大戶 ", "1000+ lot holders ")}${c.dist.big1000}%${T("、散戶 ", ", retail ")}${c.dist.retail}%\n`;
+  if (sa) s2 += `\n🤖 ${T("AI 建議：", "AI view: ")}${term(sa.action)} ${sa.confidence ?? ""}%\n${sa.summary || ""}\n${sa.chips ? T("籌碼：", "Chips: ") + sa.chips + "\n" : ""}`;
+  return s2 + shareFooter();
+}
+async function doShare(text) {
+  if (!text) return;
+  try {
+    if (navigator.share) { await navigator.share({ text }); return; }
+  } catch (e) { if (e?.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(text); toast(T("已複製，可以貼到 LINE 或其他地方", "Copied — paste it anywhere")); }
+  catch { prompt(T("複製以下內容：", "Copy this:"), text); }
+}
+
 // ================= 頁面 =================
 function pageHome() {
   const d = S.data;
@@ -501,6 +552,7 @@ function pageNews(id) {
       <div class="sub" style="margin-top:10px">原文</div><div class="sub" style="line-height:1.5">${esc(orig.slice(0, 3000))}</div>`;
   else h += `<div style="font-size:17px;font-weight:bold;line-height:1.6;margin-top:6px">${esc(it.title)}</div>${it.body && it.body !== it.title ? `<div style="margin-top:6px;line-height:1.6">${esc(it.body.slice(0, 3000))}</div>` : ""}`;
   h += `<div class="row" style="margin:12px 0">${it.link ? `<a class="btn ghost" href="${esc(it.link)}" target="_blank" rel="noopener">${T("開啟原文", "Open source")}</a>` : ""}
+    <button class="btn ghost" data-act="share-news" data-id="${esc(id)}">📤 ${T("分享", "Share")}</button>
     ${S.key ? `<button class="btn" data-act="analyze" data-id="${esc(id)}" ${S.busy["n:" + id] ? "disabled" : ""}>${a ? T("重新分析", "Re-analyze") : T("🤖 AI 分析影響", "🤖 AI impact analysis")}</button>` : `<span class="sub">${T("到 ⚙ 設定填 Gemini Key 可用 AI 深度分析", "Add a Gemini key in ⚙ Settings for AI analysis")}</span>`}
     ${S.key && !t && !S.en ? `<button class="btn ghost" data-act="tr1" data-id="${esc(id)}">🌐 翻譯</button>` : ""}</div>${progress("n:" + id)}${progress("tr")}`;
   if (t?.stocks?.length) h += `<div class="card"><b>${T("可能相關的台股", "Possibly related Taiwan stocks")}</b>${t.stocks.map(pickRow).join("")}</div>`;
@@ -569,6 +621,7 @@ function pageStock(code) {
       ${S.key ? `<button class="btn" data-act="sa" data-code="${esc(code)}" ${S.busy["s:" + code] ? "disabled" : ""}>${sa ? T("重新分析", "Re-analyze") : T("🤖 AI 買賣分析", "🤖 AI buy/sell analysis")}</button>` : ""}
       <button class="btn ghost" data-act="watch" data-code="${esc(code)}">${inW ? T("移除自選", "Remove from watchlist") : T("加入自選", "Add to watchlist")}</button>
       <a class="btn ghost" href="https://tw.stock.yahoo.com/quote/${encodeURIComponent(code)}" target="_blank" rel="noopener">Yahoo</a>
+      <button class="btn ghost" data-act="share-stock" data-code="${esc(code)}">📤 ${T("分享", "Share")}</button>
     </div>${progress("s:" + code)}`;
   h += chipsHtml(code);
   if (!S.key) h += `<div class="sub">${T("到 ⚙ 設定填入 Gemini Key 可以用 AI 分析這檔股票。", "Add a Gemini key in ⚙ Settings to analyze this stock with AI.")}</div>`;
@@ -657,7 +710,10 @@ document.addEventListener("click", e => {
   if (el.dataset.stock) { e.stopPropagation(); lastScroll[S.tab] = window.scrollY; return push({ type: "stock", code: el.dataset.stock }); }
   if (el.dataset.news) { lastScroll[S.tab] = window.scrollY; return push({ type: "news", id: el.dataset.news }); }
   const act = el.dataset.act;
-  if (act === "brief") makeBrief();
+  if (act === "share-brief") doShare(shareBriefText());
+  else if (act === "share-news") doShare(shareNewsText(el.dataset.id));
+  else if (act === "share-stock") doShare(shareStockText(el.dataset.code));
+  else if (act === "brief") makeBrief();
   else if (act === "tw") { const f = S.filters[S.tab]; f.tw = !f.tw; render(); }
   else if (act === "translate") translate(S.data.items.filter(it => it.cat === S.tab));
   else if (act === "tr1") translate(S.data.items.filter(it => it.id === el.dataset.id));
