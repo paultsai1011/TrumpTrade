@@ -85,6 +85,7 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
     override suspend fun doWork(): Result {
         val store = Store(applicationContext)
         checkUpdate(store)
+        checkWatchTech(store)
         if (!store.notifyOn) return Result.success()
         val res = try {
             Repo.fetch(Sources.alertSources, "")
@@ -131,6 +132,38 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             Notifier.show(applicationContext, item.id.hashCode(), title, text)
         }
         return Result.success()
+    }
+
+    /** 自選股技術面：收盤資料更新後，狀態變成「轉強/轉弱」或多空翻轉就通知 */
+    private fun checkWatchTech(store: Store) {
+        if (!store.notifyOn || !store.techNotify) return
+        val now = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Taipei"))
+        val hm = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        if (hm < 16 * 60) return                                   // 收盤資料約 16:00 後才齊
+        val sp = applicationContext.getSharedPreferences("tt", Context.MODE_PRIVATE)
+        val prev = try { org.json.JSONObject(sp.getString("tech_status", "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
+        val firstRun = prev.length() == 0
+        val ups = ArrayList<String>(); val downs = ArrayList<String>()
+        for (code in store.watchlist.take(30)) {
+            val k = try { KData.get(code) } catch (e: Exception) { null } ?: continue
+            val t = Tech.analyze(k)
+            if (!t.ok) continue
+            val old = prev.optJSONObject(code)
+            if (old != null && old.optInt("d") >= t.date) continue    // 這個交易日已經判斷過
+            val oldStatus = old?.optString("s") ?: ""
+            prev.put(code, org.json.JSONObject().put("s", t.status).put("d", t.date))
+            if (firstRun || oldStatus.isBlank() || oldStatus == t.status) continue
+            val name = StockMap.label(code, StockMap.nameOf(code))
+            val why = t.reasons.filter { it.dir != 0 }.take(2).joinToString(tr("、", ", ")) { it.text }
+            val line = "$name $code：${tr(oldStatus, oldStatus)}→${t.label}（$why）"
+            when {
+                t.status == "轉強" || (t.bullish && (oldStatus == "偏弱" || oldStatus == "轉弱")) -> ups.add(line)
+                t.status == "轉弱" || (t.bearish && (oldStatus == "偏多" || oldStatus == "轉強")) -> downs.add(line)
+            }
+        }
+        sp.edit().putString("tech_status", prev.toString()).apply()
+        if (ups.isNotEmpty()) Notifier.show(applicationContext, 7001, tr("🕯️ 自選股技術面轉強", "🕯️ Watchlist turning strong"), ups.joinToString("\n"))
+        if (downs.isNotEmpty()) Notifier.show(applicationContext, 7002, tr("🕯️ 自選股技術面轉弱", "🕯️ Watchlist turning weak"), downs.joinToString("\n"))
     }
 
     /** 每 6 小時檢查一次新版，有新版就通知 */

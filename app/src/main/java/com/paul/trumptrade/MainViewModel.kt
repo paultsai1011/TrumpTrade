@@ -37,6 +37,7 @@ data class UiState(
     val translating: Boolean = false,
     val briefTranslating: Boolean = false,
     val chips: Map<String, ChipData?> = emptyMap(),
+    val klines: Map<String, KLine?> = emptyMap(),
     val updateDismissed: Boolean = false,
 )
 
@@ -321,6 +322,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun loadK(code: String) {
+        if (_s.value.klines.containsKey(code)) return
+        viewModelScope.launch {
+            val k = withContext(Dispatchers.IO) { runCatching { KData.get(code) }.getOrNull() }
+            upd { it.copy(klines = it.klines + (code to k)) }
+        }
+    }
+
+    fun reloadK(codes: List<String>) {
+        viewModelScope.launch {
+            val m = withContext(Dispatchers.IO) { codes.associateWith { runCatching { KData.get(it) }.getOrNull() } }
+            upd { it.copy(klines = it.klines + m) }
+        }
+    }
+
+    fun techOf(code: String): Pair<KLine, TechResult>? {
+        val k = _s.value.klines[code] ?: return null
+        val kl = Tech.withLive(k, _s.value.quotes[code])
+        return kl to Tech.analyze(kl)
+    }
+
     /** 個股頁開著時，每 10 秒更新一次即時報價與五檔 */
     fun liveQuote(code: String) {
         viewModelScope.launch {
@@ -355,7 +377,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val themes = StockMap.themesOfStock(code).map { it.name }
             val chips = _s.value.chips[code] ?: withContext(Dispatchers.IO) { runCatching { Chips.get(code) }.getOrNull() }
-            val prompt = Prompts.stock(code, name, q, themes, relatedUsNews(code), tw, chipSummary(chips))
+            if (!_s.value.klines.containsKey(code)) {
+                val k = withContext(Dispatchers.IO) { runCatching { KData.get(code) }.getOrNull() }
+                upd { it.copy(klines = it.klines + (code to k)) }
+            }
+            val tk = techOf(code)
+            val prompt = Prompts.stock(code, name, q, themes, relatedUsNews(code), tw, chipSummary(chips) + "\n" + Tech.summary(tk?.second, tk?.first))
             val o = withContext(Dispatchers.IO) { Gemini.ask(store, prompt, onAi) }
             o.put("_t", System.currentTimeMillis()).put("_code", code).put("_name", name)
             withContext(Dispatchers.IO) { store.saveStockAnalysis(code, o) }

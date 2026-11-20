@@ -1,4 +1,5 @@
 import { STOCK_NAMES, themeByName, themesOfStock, DEFAULT_WATCH, THEME_EN, EN_NAMES } from "./themes.js";
+import { analyze as techAnalyze, techSummary } from "./tech.js";
 
 // ================= 狀態 =================
 const LS = {
@@ -189,13 +190,14 @@ ${q && q.price ? `現價 ${q.price}（${pct(q).toFixed(2)}%），昨收 ${q.prev
 所屬題材：${themes.join("、") || "未分類"}
 籌碼面：
 ${chipSummary(code) || "（無資料）"}
+${techSummary(techOf(code)) || "技術面：（無資料）"}
 
 相關美國新聞／川普／政策：
 ${news.slice(0, 15).map(it => `- [${fmt(it.time)}] ${(trOf(it)?.zh || it.title).slice(0, 180)}`).join("\n") || "（無）"}
 
 只輸出 JSON：
-請同時考慮消息面與籌碼面（法人動向、融資券、大戶持股變化、量能）。
-{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"]}${langRule()}`,
+請同時考慮消息面、籌碼面（法人動向、融資券、大戶持股變化、量能）與技術面（均線、KD、MACD、K線型態）。
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","tech":"技術面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"]}${langRule()}`,
 };
 
 async function job(key, fn) {
@@ -436,6 +438,84 @@ function chipsHtml(code) {
   return h;
 }
 
+// ================= K 線與技術分析 =================
+S.kd = {}; S.kdLoading = {};
+async function loadK(code) {
+  const k = code[0];
+  if (S.kd[k] || S.kdLoading[k]) return;
+  S.kdLoading[k] = true;
+  try { const r = await fetch(`data/k/${k}.json?t=${Math.floor(Date.now() / 600000)}`); S.kd[k] = r.ok ? await r.json() : {}; }
+  catch { S.kd[k] = {}; }
+  S.kdLoading[k] = false;
+  render();
+}
+/** 歷史 K 線＋（盤中）今天的即時 K 棒 */
+function kOf(code) {
+  const raw = S.kd[code[0]]?.[code]; if (!raw) return null;
+  const k = { d: [...raw.d], o: [...raw.o], h: [...raw.h], l: [...raw.l], c: [...raw.c], v: [...raw.v] };
+  const q = S.data.quotes[code];
+  const today = +new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10).replace(/-/g, "");
+  if (q && q.price > 0 && q.op > 0 && k.d.length && k.d[k.d.length - 1] < today && new Date(Date.now() + 8 * 3600_000).getUTCDay() % 6 !== 0) {
+    k.d.push(today); k.o.push(q.op); k.h.push(Math.max(q.hi || q.price, q.price)); k.l.push(Math.min(q.lo || q.price, q.price)); k.c.push(q.price); k.v.push(q.vol || 0);
+  }
+  return k;
+}
+const techCache = {};
+function techOf(code) {
+  const k = kOf(code); if (!k) return null;
+  const key = code + k.d.length + k.c[k.c.length - 1];
+  return techCache[key] || (techCache[key] = techAnalyze(k));
+}
+const techCls = st => /強|多/.test(st) ? "up" : /弱/.test(st) ? "down" : "flat";
+const techLabel = t => S.en ? t.statusEn : t.status;
+function candleSvg(k, t, N = 60) {
+  const n = k.c.length, s0 = Math.max(0, n - N), m = n - s0;
+  const W = 340, H = 170, VH = 40, pad = 2, bw = W / m;
+  const hi = Math.max(...k.h.slice(s0)), lo = Math.min(...k.l.slice(s0)), vmax = Math.max(1, ...k.v.slice(s0));
+  const y = p => pad + (hi - p) / (hi - lo || 1) * (H - pad * 2);
+  let g = "";
+  for (let i = s0; i < n; i++) {
+    const x = (i - s0) * bw + bw / 2, up = k.c[i] >= k.o[i], col = up ? "var(--up)" : "var(--down)";
+    g += `<line x1="${x}" x2="${x}" y1="${y(k.h[i])}" y2="${y(k.l[i])}" stroke="${col}" stroke-width="1"/>`;
+    const top = y(Math.max(k.o[i], k.c[i])), bot = y(Math.min(k.o[i], k.c[i]));
+    g += `<rect x="${x - bw * 0.35}" y="${top}" width="${bw * 0.7}" height="${Math.max(1, bot - top)}" fill="${col}"/>`;
+    const vh = k.v[i] / vmax * (VH - 4);
+    g += `<rect x="${x - bw * 0.35}" y="${H + VH - vh}" width="${bw * 0.7}" height="${vh}" fill="${col}" opacity=".55"/>`;
+  }
+  const line = (arr, col) => { let d = ""; for (let i = s0; i < n; i++) if (arr[i] != null) d += `${d ? "L" : "M"}${((i - s0) * bw + bw / 2).toFixed(1)},${y(arr[i]).toFixed(1)}`; return d ? `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.3"/>` : ""; };
+  g += line(t.series.ma5, "#ffc107") + line(t.series.ma20, "#8ab4f8") + line(t.series.ma60, "#ce93d8");
+  return `<svg viewBox="0 0 ${W} ${H + VH}" width="100%" style="display:block;margin-top:6px">${g}
+    <text x="2" y="10" fill="#9aa0a6" font-size="9">${hi.toFixed(2)}</text><text x="2" y="${H - 2}" fill="#9aa0a6" font-size="9">${lo.toFixed(2)}</text></svg>
+    <div class="sub"><span style="color:#ffc107">━ MA5</span>　<span style="color:#8ab4f8">━ MA20</span>　<span style="color:#ce93d8">━ MA60</span>　${md(k.d[s0])}–${md(k.d[n - 1])}</div>`;
+}
+function lineSvg(series, N, opts) {
+  const n = series[0].arr.length, s0 = Math.max(0, n - N), m = n - s0, W = 340, H = opts.h || 60;
+  const vals = series.flatMap(s => s.arr.slice(s0)).filter(v => v != null);
+  const hi = opts.hi ?? Math.max(...vals), lo = opts.lo ?? Math.min(...vals);
+  const y = v => 2 + (hi - v) / (hi - lo || 1) * (H - 4), bw = W / m;
+  let g = (opts.lines || []).map(v => `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#3a414a" stroke-dasharray="3 3"/>`).join("");
+  for (const s of series) {
+    if (s.bars) { for (let i = s0; i < n; i++) { const v = s.arr[i]; if (v == null) continue; const y0 = y(0), y1 = y(v); g += `<rect x="${(i - s0) * bw + 1}" y="${Math.min(y0, y1)}" width="${Math.max(1, bw - 2)}" height="${Math.abs(y1 - y0)}" fill="${v >= 0 ? "var(--up)" : "var(--down)"}"/>`; } }
+    else { let d = ""; for (let i = s0; i < n; i++) if (s.arr[i] != null) d += `${d ? "L" : "M"}${((i - s0) * bw + bw / 2).toFixed(1)},${y(s.arr[i]).toFixed(1)}`; g += `<path d="${d}" fill="none" stroke="${s.col}" stroke-width="1.3"/>`; }
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block">${g}</svg>`;
+}
+function techHtml(code) {
+  const k = kOf(code);
+  if (!k) { loadK(code); return `<div class="card sub">${S.kd[code[0]] ? T("這檔暫無K線資料（雲端仍在補歷史資料）", "No K-line data yet (cloud is still backfilling)") : T("K線資料載入中…", "Loading K-line…")}</div>`; }
+  const t = techOf(code);
+  let h = `<div class="card"><div class="row"><b class="grow">${T("🕯️ K線與技術分析", "🕯️ Chart & technicals")}</b>
+    <span class="badge ${techCls(t.status)} ${techCls(t.status)}">${esc(techLabel(t))}${t.n >= 26 ? ` ${t.score > 0 ? "+" : ""}${t.score}` : ""}</span></div>`;
+  if (t.n < 26) return h + `<div class="sub">${T(`目前只有 ${t.n} 天資料，至少要 26 天才能計算，雲端正在補抓歷史資料。`, `Only ${t.n} days so far; need 26+. Cloud is backfilling.`)}</div></div>`;
+  h += candleSvg(k, t);
+  h += `<div class="sub" style="margin-top:8px">KD <span style="color:#ffc107">K ${t.last.k.toFixed(1)}</span> <span style="color:#8ab4f8">D ${t.last.d.toFixed(1)}</span></div>` +
+    lineSvg([{ arr: t.series.K, col: "#ffc107" }, { arr: t.series.D, col: "#8ab4f8" }], 60, { hi: 100, lo: 0, lines: [20, 80], h: 50 });
+  h += `<div class="sub" style="margin-top:6px">MACD ${T("柱狀體", "histogram")} ${t.last.osc.toFixed(2)}　RSI ${t.last.rsi?.toFixed(1) ?? "–"}</div>` + lineSvg([{ arr: t.series.osc, bars: true }], 60, { h: 45 });
+  h += `<h3>${T("訊號", "Signals")}</h3>` + t.reasons.map(r => `<div class="${r.dir > 0 ? "up" : r.dir < 0 ? "down" : "flat"}" style="font-size:13.5px;margin:3px 0">${r.dir > 0 ? "▲" : r.dir < 0 ? "▼" : "●"} ${esc(S.en ? r.en : r.zh)}</div>`).join("");
+  h += `<div class="sub" style="margin-top:8px">${T("判斷方式：各訊號加減分，≥4 轉強、2~3 偏多、-1~1 盤整、-2~-3 偏弱、≤-4 轉弱。技術分析只反映過去價量，不保證未來走勢。", "Scoring: ≥4 turning strong, 2–3 bullish, -1–1 sideways, -2–-3 bearish, ≤-4 turning weak. Technicals reflect past price/volume only.")}</div></div>`;
+  return h;
+}
+
 // ================= 分享 =================
 const SITE = "https://paultsai1011.github.io/TrumpTrade/";
 const shareFooter = () => "\n" + T("⚠️ AI 自動分析，僅供參考，不構成投資建議", "⚠️ AI-generated, for reference only, not investment advice") + "\n👉 " + T("川普財經雷達", "Trump Market Radar") + " " + SITE;
@@ -473,6 +553,8 @@ function shareStockText(code) {
   const sa = S.stockAn[code], c = chipsOf(code);
   let s2 = `📈 ${stockLabel(code, nameOf(code))} ${code}${qtxt(code)}\n`;
   if (c?.h?.length) s2 += `${T("法人5日：外資 ", "Institutions 5d: Foreign ")}${fmtN(sumN(c.h, 1, 5))}${T("、投信 ", ", Trust ")}${fmtN(sumN(c.h, 2, 5))}${T("、自營 ", ", Dealer ")}${fmtN(sumN(c.h, 3, 5))}${T(" 張", " lots")}\n`;
+  const tt = techOf(code);
+  if (tt && tt.n >= 26) s2 += `${T("技術面：", "Technicals: ")}${techLabel(tt)}（${tt.reasons.filter(r => r.dir).slice(0, 3).map(r => S.en ? r.en : r.zh).join(S.en ? "; " : "；")}）\n`;
   if (c?.dist) s2 += `${T("千張大戶 ", "1000+ lot holders ")}${c.dist.big1000}%${T("、散戶 ", ", retail ")}${c.dist.retail}%\n`;
   if (sa) s2 += `\n🤖 ${T("AI 建議：", "AI view: ")}${term(sa.action)} ${sa.confidence ?? ""}%\n${sa.summary || ""}\n${sa.chips ? T("籌碼：", "Chips: ") + sa.chips + "\n" : ""}`;
   return s2 + shareFooter();
@@ -579,7 +661,10 @@ function pageStocks() {
     <button class="btn" data-act="add">${T("加入", "Add")}</button></div><h2>${T("⭐ 自選股", "⭐ Watchlist")}</h2>`;
   h += S.watch.map(c => {
     const sa = S.stockAn[c];
-    return `<div class="card click" data-stock="${esc(c)}"><div class="row"><div class="grow"><b>${esc(stockLabel(c, nameOf(c)))}</b> <span class="sub">${esc(c)}</span>
+    if (!S.kd[c[0]]) loadK(c);
+    const tt = techOf(c);
+    const tb = tt && tt.n >= 26 ? `<span class="badge ${techCls(tt.status)} ${techCls(tt.status)}" style="margin-left:6px;font-size:11px">🕯️ ${esc(techLabel(tt))}</span>` : "";
+    return `<div class="card click" data-stock="${esc(c)}"><div class="row"><div class="grow"><b>${esc(stockLabel(c, nameOf(c)))}</b> <span class="sub">${esc(c)}</span>${tb}
       ${sa ? `<div class="sub" style="margin-top:2px">${esc(sa.summary || "")}</div>` : ""}</div>${priceHtml(c)}
       ${sa ? `<span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span>` : ""}
       <button class="icon" data-del="${esc(c)}" style="font-size:16px" aria-label="${T("移除", "Remove")}">✕</button></div></div>`;
@@ -623,6 +708,7 @@ function pageStock(code) {
       <a class="btn ghost" href="https://tw.stock.yahoo.com/quote/${encodeURIComponent(code)}" target="_blank" rel="noopener">Yahoo</a>
       <button class="btn ghost" data-act="share-stock" data-code="${esc(code)}">📤 ${T("分享", "Share")}</button>
     </div>${progress("s:" + code)}`;
+  h += techHtml(code);
   h += chipsHtml(code);
   if (!S.key) h += `<div class="sub">${T("到 ⚙ 設定填入 Gemini Key 可以用 AI 分析這檔股票。", "Add a Gemini key in ⚙ Settings to analyze this stock with AI.")}</div>`;
   if (sa) {
@@ -630,6 +716,7 @@ function pageStock(code) {
     h += `<div class="card"><div class="row"><b class="grow">${T("🤖 AI 建議", "🤖 AI view")}</b><span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span></div>
       <div style="margin-top:6px">${esc(sa.summary || "")}</div>
       ${sa.chips ? `<h3>${T("籌碼面", "Chips")}</h3><div>${esc(sa.chips)}</div>` : ""}
+      ${sa.tech ? `<h3>${T("技術面", "Technicals")}</h3><div>${esc(sa.tech)}</div>` : ""}
       ${sa.short_term ? `<h3>${T("短線（1~2週）", "Short term (1–2 weeks)")}</h3><div>${esc(sa.short_term)}</div>` : ""}${sa.mid_term ? `<h3>${T("中線（1~3個月）", "Mid term (1–3 months)")}</h3><div>${esc(sa.mid_term)}</div>` : ""}
       ${list(T("理由", "Reasons"), sa.reasons)}${list(T("⚠️ 風險", "⚠️ Risks"), sa.risks)}${list(T("👀 接下來觀察", "👀 What to watch"), sa.catalysts)}
       <div class="sub" style="margin-top:8px">${T("分析時間 ", "Analyzed ")}${full(sa.t)}</div></div>`;

@@ -45,6 +45,9 @@ class Store(ctx: Context) {
     var alertKeywords: String
         get() = str("alert_kw", DEFAULT_KW)
         set(v) = put("alert_kw", v)
+    var techNotify: Boolean
+        get() = sp.getBoolean("tech_notify", true)
+        set(v) = sp.edit().putBoolean("tech_notify", v).apply()
     var english: Boolean
         get() = sp.getBoolean("lang_en", false)
         set(v) = sp.edit().putBoolean("lang_en", v).apply()

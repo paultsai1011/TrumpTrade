@@ -51,6 +51,7 @@ data class Quote(
     val code: String, val name: String, val price: Double, val prev: Double, val time: String,
     val vol: Int = 0, val askP: List<Double> = emptyList(), val askV: List<Int> = emptyList(),
     val bidP: List<Double> = emptyList(), val bidV: List<Int> = emptyList(),
+    val open: Double = 0.0, val high: Double = 0.0, val low: Double = 0.0,
 ) {
     val change: Double get() = if (price > 0 && prev > 0) price - prev else 0.0
     val pct: Double get() = if (price > 0 && prev > 0) (price - prev) / prev * 100 else 0.0
@@ -89,6 +90,7 @@ data class StockAnalysis(
     val catalysts: List<String>,
     val time: Long,
     val chips: String = "",
+    val tech: String = "",
 )
 
 // ---------- JSON helpers ----------
@@ -188,6 +190,7 @@ fun parseStockAnalysis(o: JSONObject): StockAnalysis = StockAnalysis(
     catalysts = o.strList("catalysts"),
     time = o.optLong("_t", System.currentTimeMillis()),
     chips = o.s("chips"),
+    tech = o.s("tech"),
 )
 
 fun parseTranslation(o: JSONObject): Translation = Translation(

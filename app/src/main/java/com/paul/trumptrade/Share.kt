@@ -57,7 +57,7 @@ object Share {
         return sb.toString() + footer()
     }
 
-    fun stock(code: String, name: String, q: Quote?, sa: StockAnalysis?, c: ChipData?): String {
+    fun stock(code: String, name: String, q: Quote?, sa: StockAnalysis?, c: ChipData?, t: TechResult? = null): String {
         val sb = StringBuilder()
         sb.append("📈 ").append(StockMap.label(code, name)).append(" ").append(code).append(pct(q)).append("\n")
         if (c != null && c.days.isNotEmpty()) {
@@ -66,6 +66,8 @@ object Share {
                 .append(tr("、投信 ", ", Trust ")).append("%+,d".format(c.sum(5) { it.trust }))
                 .append(tr("、自營 ", ", Dealer ")).append("%+,d".format(c.sum(5) { it.dealer })).append(tr(" 張", " lots")).append("\n")
         }
+        if (t != null && t.ok) sb.append(tr("技術面：", "Technicals: ")).append(t.label).append("（")
+            .append(t.reasons.filter { it.dir != 0 }.take(3).joinToString(tr("；", "; ")) { it.text }).append("）\n")
         c?.dist?.let { sb.append(tr("千張大戶 ", "1000+ lot holders ")).append(it.big1000).append("%").append(tr("、散戶 ", ", retail ")).append(it.retail).append("%\n") }
         if (sa != null) {
             sb.append("\n🤖 ").append(tr("AI 建議：", "AI view: ")).append(term(sa.action)).append(" ").append(sa.confidence).append("%\n").append(sa.summary).append("\n")

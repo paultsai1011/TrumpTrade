@@ -40,6 +40,7 @@ object TwQuote {
                         code, m.s("n").ifBlank { StockMap.nameOf(code) }, price, prev, m.s("t"),
                         vol = m.s("v").toIntOrNull() ?: 0, askP = nums("a"), askV = nums("f").map { it.toInt() },
                         bidP = nums("b"), bidV = nums("g").map { it.toInt() },
+                        open = d(m.s("o")), high = d(m.s("h")), low = d(m.s("l")),
                     )
                 }
             } catch (_: Exception) {

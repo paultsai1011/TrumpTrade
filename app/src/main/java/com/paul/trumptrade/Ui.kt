@@ -267,8 +267,8 @@ fun Disclaimer() {
 }
 
 @Composable
-fun ActionBadge(action: String, confidence: Int? = null) {
-    val c = actionColor(action)
+fun ActionBadge(action: String, confidence: Int? = null, color: Color? = null) {
+    val c = color ?: actionColor(action)
     Surface(shape = RoundedCornerShape(6.dp), color = c.copy(alpha = 0.18f)) {
         Text(
             term(action) + (confidence?.let { " $it%" } ?: ""),
@@ -680,6 +680,7 @@ fun AnalysisCard(a: Analysis, quotes: Map<String, Quote>, onStock: (String) -> U
 @Composable
 fun StockTab(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
     var input by remember { mutableStateOf("") }
+    LaunchedEffect(s.watchlist) { vm.reloadK(s.watchlist.filter { !s.klines.containsKey(it) }) }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -702,7 +703,7 @@ fun StockTab(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
         }
         items(s.watchlist, key = { "w_$it" }) { code ->
             WatchRow(code, vm.nameOf(code), s.quotes[code], s.stockAnalyses[code], code in s.stockAnalyzing,
-                onClick = { onStock(code) }, onDelete = { vm.removeWatch(code) })
+                onClick = { onStock(code) }, onDelete = { vm.removeWatch(code) }, tech = vm.techOf(code)?.second)
         }
         // AI 提及統計
         val picks = s.analyses.values.filter { System.currentTimeMillis() - it.time < 3 * 86400_000L }.flatMap { it.stocks }
@@ -751,11 +752,14 @@ fun StockTab(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
 }
 
 @Composable
-fun WatchRow(code: String, name: String, q: Quote?, sa: StockAnalysis?, busy: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
+fun WatchRow(code: String, name: String, q: Quote?, sa: StockAnalysis?, busy: Boolean, onClick: () -> Unit, onDelete: () -> Unit, tech: TechResult? = null) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("${StockMap.label(code, name.ifBlank { q?.name ?: "" })}  $code", fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${StockMap.label(code, name.ifBlank { q?.name ?: "" })}  $code", fontWeight = FontWeight.Bold)
+                    if (tech != null && tech.ok) { Spacer(Modifier.width(6.dp)); Text("🕯️" + tech.label, fontSize = 11.sp, color = techColor(tech), fontWeight = FontWeight.Bold) }
+                }
                 if (sa != null) Text(sa.summary, fontSize = 12.sp, color = Neutral, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             PriceText(q)
@@ -775,6 +779,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
         vm.refreshQuotes(listOf(code))
         if (s.stockNews[code] == null) vm.loadStockNews(code)
         vm.loadChips(code)
+        vm.loadK(code)
         while (true) {
             kotlinx.coroutines.delay(10_000)
             vm.liveQuote(code)
@@ -806,11 +811,15 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
                 OutlinedButton(onClick = { runCatching { uri.openUri("https://tw.stock.yahoo.com/quote/$code") } }) { Text(tr("Yahoo股市", "Yahoo")) }
                 Spacer(Modifier.width(8.dp))
                 val shareCtx = LocalContext.current
-                OutlinedButton(onClick = { Share.send(shareCtx, Share.stock(code, name, q, sa, s.chips[code])) }) {
+                OutlinedButton(onClick = { Share.send(shareCtx, Share.stock(code, name, q, sa, s.chips[code], vm.techOf(code)?.second)) }) {
                     Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr("分享", "Share"))
                 }
             }
             if (busy) AiProgress(s)
+        }
+        item {
+            val tk = remember(s.klines[code], q) { vm.techOf(code) }
+            TechSection(tk?.first, tk?.second, s.klines.containsKey(code))
         }
         item { Column { ChipsSection(q, s.chips[code], s.chips.containsKey(code)) } }
         if (sa != null) item {
@@ -822,6 +831,7 @@ fun StockScreen(vm: MainViewModel, s: UiState, code: String, onNews: (NewsItem) 
                     }
                     Text(sa.summary, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
                     if (sa.chips.isNotBlank()) { SectionTitle(tr("籌碼面", "Chips")); Text(sa.chips, fontSize = 14.sp) }
+                    if (sa.tech.isNotBlank()) { SectionTitle(tr("技術面", "Technicals")); Text(sa.tech, fontSize = 14.sp) }
                     if (sa.shortTerm.isNotBlank()) { SectionTitle(tr("短線（1~2週）", "Short term (1–2 weeks)")); Text(sa.shortTerm, fontSize = 14.sp) }
                     if (sa.midTerm.isNotBlank()) { SectionTitle(tr("中線（1~3個月）", "Mid term (1–3 months)")); Text(sa.midTerm, fontSize = 14.sp) }
                     if (sa.reasons.isNotEmpty()) { SectionTitle(tr("理由", "Reasons")); sa.reasons.forEach { Text("• $it", fontSize = 13.sp) } }
@@ -867,6 +877,7 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
     var interval by remember { mutableIntStateOf(st.intervalMin) }
     var kw by remember { mutableStateOf(st.alertKeywords) }
     var autoTr by remember { mutableStateOf(st.autoTranslate) }
+    var techN by remember { mutableStateOf(st.techNotify) }
 
     LazyColumn(contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -925,6 +936,13 @@ fun SettingsScreen(vm: MainViewModel, s: UiState) {
                     Text(tr("每次最多分析 2 則，會用到一點免費額度", "Up to 2 per check, uses a little free quota"), fontSize = 12.sp, color = Neutral)
                 }
                 Switch(checked = notifyAi, onCheckedChange = { notifyAi = it })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr("自選股技術面轉強／轉弱通知", "Watchlist technical alerts"))
+                    Text(tr("每天收盤後（約 16:00 起）檢查，狀態改變才通知", "Checked after market close (~16:00); alerts only on change"), fontSize = 12.sp, color = Neutral)
+                }
+                Switch(checked = techN, onCheckedChange = { techN = it; st.techNotify = it })
             }
             Text(tr("檢查頻率", "Check interval"), fontWeight = FontWeight.Bold)
             Row {

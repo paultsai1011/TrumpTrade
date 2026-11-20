@@ -252,8 +252,8 @@ $usLines
 $twLines
 
 只輸出 JSON：
-請同時考慮消息面與籌碼面（法人動向、融資券、大戶持股變化、量能）。
-{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}${langRule()}
+請同時考慮消息面、籌碼面（法人動向、融資券、大戶持股變化、量能）與技術面（均線、KD、MACD、K線型態）。
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","chips":"籌碼面解讀1~2句","tech":"技術面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由1","理由2","理由3"],"risks":["風險1","風險2"],"catalysts":["接下來要觀察的事件"]}${langRule()}
 """.trimIndent()
     }
 }
