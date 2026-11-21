@@ -57,6 +57,23 @@ object Share {
         return sb.toString() + footer()
     }
 
+    fun us(t: String, q: UsQuote?, sa: StockAnalysis?, tech: TechResult?, quotes: Map<String, Quote>): String {
+        val sb = StringBuilder()
+        sb.append("🇺🇸 ").append(t).append(" ").append(Us.name(t, q?.name ?: ""))
+        if (q != null) sb.append(" $%.2f（%+.2f%%）".format(q.price, q.pct))
+        sb.append("\n")
+        if (tech != null && tech.ok) sb.append(tr("技術面：", "Technicals: ")).append(tech.label).append("（")
+            .append(tech.reasons.filter { it.dir != 0 }.take(3).joinToString(tr("；", "; ")) { it.text }).append("）\n")
+        Us.map[t]?.tw?.takeIf { it.isNotEmpty() }?.let { tw ->
+            sb.append(tr("台股連動：", "Linked Taiwan stocks: ")).append(tw.joinToString(tr("、", ", ")) { "${StockMap.label(it, StockMap.nameOf(it))}$it${pct(quotes[it])}" }).append("\n")
+        }
+        if (sa != null) {
+            sb.append("\n🤖 ").append(tr("AI 建議：", "AI view: ")).append(term(sa.action)).append(" ").append(sa.confidence).append("%\n").append(sa.summary).append("\n")
+            if (sa.twImpact.isNotBlank()) sb.append(tr("對台股：", "Taiwan impact: ")).append(sa.twImpact).append("\n")
+        }
+        return sb.toString() + footer()
+    }
+
     fun stock(code: String, name: String, q: Quote?, sa: StockAnalysis?, c: ChipData?, t: TechResult? = null): String {
         val sb = StringBuilder()
         sb.append("📈 ").append(StockMap.label(code, name)).append(" ").append(code).append(pct(q)).append("\n")

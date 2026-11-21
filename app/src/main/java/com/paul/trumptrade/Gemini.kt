@@ -233,6 +233,27 @@ events 挑 3~6 件最重要的；buy/sell/watch 各 0~5 檔。$STOCK_RULE
 """.trimIndent()
     }
 
+    fun us(t: String, q: UsQuote?, tech: String, news: List<NewsItem>): String {
+        val info = Us.map[t]
+        val price = if (q != null) "現價 $${q.price}（${"%+.2f".format(q.pct)}%），前收 $${q.prev}，資料時間 ${q.time}" else "報價暫無"
+        val tw = info?.tw?.joinToString("、") { "$it ${StockMap.nameOf(it)}" }?.ifBlank { null } ?: "（無）"
+        val lines = news.take(15).joinToString("\n") { "- [${fmt(it.time)}] ${it.title.take(180)}" }.ifBlank { "（無）" }
+        return """
+你是資深美股與台股分析師。請評估美股 $t（${info?.zh ?: q?.name ?: ""}）目前的操作建議，以及它對台灣股市（特別是台灣供應鏈）的連動影響。
+現在時間：${now()}（台灣時間）
+$price
+已知相關台股：$tw
+${tech.ifBlank { "技術面：（無資料）" }}
+
+相關新聞：
+$lines
+
+請同時考慮消息面與技術面。只輸出 JSON：
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","tech":"技術面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"],"tw_impact":"對台股與台灣供應鏈的影響","tw_stocks":[{"code":"2330","name":"台積電","action":"買進/賣出/觀望","confidence":0~100,"reason":""}]}
+tw_stocks 列 0~5 檔受連動最明顯的台股。$STOCK_RULE${langRule()}
+""".trimIndent()
+    }
+
     fun stock(code: String, name: String, q: Quote?, themes: List<String>, us: List<NewsItem>, tw: List<NewsItem>, chips: String = ""): String {
         val price = if (q != null && q.price > 0) "現價 ${q.price}（${"%+.2f".format(q.pct)}%），昨收 ${q.prev}" else "報價暫無"
         val usLines = us.take(15).joinToString("\n") { "- [${fmt(it.time)}] ${it.title.take(180)}" }.ifBlank { "（無）" }

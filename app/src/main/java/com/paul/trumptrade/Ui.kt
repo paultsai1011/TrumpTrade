@@ -188,7 +188,7 @@ fun AppRoot(vm: MainViewModel) {
 
     val title = when {
         settings -> tr("設定", "Settings")
-        stock != null -> tr("個股分析", "Stock analysis")
+        stock != null -> if (Us.isUs(stock ?: "")) tr("美股分析", "US stock") else tr("個股分析", "Stock analysis")
         detail != null -> tr("消息分析", "Analysis")
         else -> if (tab == 0) tr("川普財經雷達", "Trump Market Radar") else tabs()[tab]
     }
@@ -229,6 +229,7 @@ fun AppRoot(vm: MainViewModel) {
             val dt = detail
             when {
                 settings -> SettingsScreen(vm, s)
+                st != null && Us.isUs(st) -> UsStockScreen(vm, s, st, onStock = { stock = it }, onNews = { detail = it; stock = null })
                 st != null -> StockScreen(vm, s, st, onNews = { detail = it; stock = null })
                 dt != null -> DetailScreen(vm, s, dt, onStock = { stock = it })
                 else -> when (tab) {
@@ -705,6 +706,7 @@ fun StockTab(vm: MainViewModel, s: UiState, onStock: (String) -> Unit) {
             WatchRow(code, vm.nameOf(code), s.quotes[code], s.stockAnalyses[code], code in s.stockAnalyzing,
                 onClick = { onStock(code) }, onDelete = { vm.removeWatch(code) }, tech = vm.techOf(code)?.second)
         }
+        item { UsWatchSection(vm, s, onUs = onStock) }
         // AI 提及統計
         val picks = s.analyses.values.filter { System.currentTimeMillis() - it.time < 3 * 86400_000L }.flatMap { it.stocks }
         if (picks.isNotEmpty()) {

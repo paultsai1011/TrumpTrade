@@ -139,13 +139,15 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         if (!store.notifyOn || !store.techNotify) return
         val now = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Taipei"))
         val hm = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
-        if (hm < 16 * 60) return                                   // 收盤資料約 16:00 後才齊
         val sp = applicationContext.getSharedPreferences("tt", Context.MODE_PRIVATE)
         val prev = try { org.json.JSONObject(sp.getString("tech_status", "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
         val firstRun = prev.length() == 0
         val ups = ArrayList<String>(); val downs = ArrayList<String>()
-        for (code in store.watchlist.take(30)) {
-            val k = try { KData.get(code) } catch (e: Exception) { null } ?: continue
+        // 台股：收盤資料約 16:00 後才齊；美股：Nasdaq 日K 在美股收盤後更新（日期去重）
+        val codes = (if (hm >= 16 * 60) store.watchlist.take(30) else emptyList()) + store.usWatch.take(20)
+        for (code in codes) {
+            val us = Us.isUs(code)
+            val k = try { if (us) Us.k(code) else KData.get(code) } catch (e: Exception) { null } ?: continue
             val t = Tech.analyze(k)
             if (!t.ok) continue
             val old = prev.optJSONObject(code)
@@ -153,7 +155,7 @@ class NewsWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             val oldStatus = old?.optString("s") ?: ""
             prev.put(code, org.json.JSONObject().put("s", t.status).put("d", t.date))
             if (firstRun || oldStatus.isBlank() || oldStatus == t.status) continue
-            val name = StockMap.label(code, StockMap.nameOf(code))
+            val name = if (us) Us.name(code) else StockMap.label(code, StockMap.nameOf(code))
             val why = t.reasons.filter { it.dir != 0 }.take(2).joinToString(tr("、", ", ")) { it.text }
             val line = "$name $code：${tr(oldStatus, oldStatus)}→${t.label}（$why）"
             when {

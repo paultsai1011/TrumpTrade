@@ -38,6 +38,8 @@ data class UiState(
     val briefTranslating: Boolean = false,
     val chips: Map<String, ChipData?> = emptyMap(),
     val klines: Map<String, KLine?> = emptyMap(),
+    val usWatch: List<String> = emptyList(),
+    val usQuotes: Map<String, UsQuote> = emptyMap(),
     val updateDismissed: Boolean = false,
 )
 
@@ -52,6 +54,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             stockAnalyses = store.loadStockAnalyses(),
             brief = store.loadBrief(),
             watchlist = store.watchlist,
+            usWatch = store.usWatch,
         )
     )
     val state: StateFlow<UiState> = _s.asStateFlow()
@@ -334,6 +337,76 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val m = withContext(Dispatchers.IO) { codes.associateWith { runCatching { KData.get(it) }.getOrNull() } }
             upd { it.copy(klines = it.klines + m) }
+        }
+    }
+
+    // ---------- 美股 ----------
+    fun loadUs(tickers: List<String>, withK: Boolean = true) {
+        if (tickers.isEmpty()) return
+        viewModelScope.launch {
+            val q = withContext(Dispatchers.IO) { runCatching { Us.quotes(tickers) }.getOrDefault(emptyMap()) }
+            if (q.isNotEmpty()) upd { it.copy(usQuotes = it.usQuotes + q) }
+            if (withK) {
+                val need = tickers.filter { !_s.value.klines.containsKey(it) }
+                val m = withContext(Dispatchers.IO) { need.associateWith { runCatching { Us.k(it) }.getOrNull() } }
+                if (m.isNotEmpty()) upd { it.copy(klines = it.klines + m) }
+            }
+        }
+    }
+
+    fun usTech(t: String): Pair<KLine, TechResult>? {
+        val k = _s.value.klines[t] ?: return null
+        val kl = Us.withLive(k, _s.value.usQuotes[t])
+        return kl to Tech.analyze(kl)
+    }
+
+    fun addUsWatch(raw: String) {
+        val t = raw.trim().uppercase()
+        if (!Us.isUs(t)) { toast(tr("請輸入美股代號，例如 NVDA", "Enter a US ticker, e.g. NVDA")); return }
+        val list = (_s.value.usWatch + t).distinct()
+        store.usWatch = list
+        upd { it.copy(usWatch = list) }
+        loadUs(listOf(t))
+    }
+
+    fun removeUsWatch(t: String) {
+        val list = _s.value.usWatch - t
+        store.usWatch = list
+        upd { it.copy(usWatch = list) }
+    }
+
+    fun usNews(t: String): List<NewsItem> {
+        val info = Us.map[t]
+        val words = listOfNotNull(t, info?.en, info?.zh).map { Regex.escape(it) }
+        val re = Regex("\\b(" + words.joinToString("|") + ")\\b", RegexOption.IGNORE_CASE)
+        val s = _s.value
+        return s.items.filter { re.containsMatchIn(it.title) || re.containsMatchIn(s.translations[it.id]?.zh ?: "") }.take(20)
+    }
+
+    fun analyzeUs(t: String) {
+        if (t in _s.value.stockAnalyzing) return
+        upd { it.copy(stockAnalyzing = it.stockAnalyzing + t) }
+        aiBegin()
+        viewModelScope.launch {
+            try {
+                if (!_s.value.klines.containsKey(t)) {
+                    val k = withContext(Dispatchers.IO) { runCatching { Us.k(t) }.getOrNull() }
+                    upd { it.copy(klines = it.klines + (t to k)) }
+                }
+                val q = _s.value.usQuotes[t] ?: withContext(Dispatchers.IO) { Us.quotes(listOf(t)) }[t]?.also { qq -> upd { it.copy(usQuotes = it.usQuotes + (t to qq)) } }
+                val tk = usTech(t)
+                val o = withContext(Dispatchers.IO) { Gemini.ask(store, Prompts.us(t, q, Tech.summary(tk?.second, tk?.first), usNews(t)), onAi) }
+                o.put("_t", System.currentTimeMillis()).put("_code", t).put("_name", Us.name(t, q?.name ?: ""))
+                withContext(Dispatchers.IO) { store.saveStockAnalysis(t, o) }
+                val sa = parseStockAnalysis(o)
+                upd { it.copy(stockAnalyses = it.stockAnalyses + (t to sa)) }
+                refreshQuotes(sa.twStocks.map { it.code } + (Us.map[t]?.tw ?: emptyList()))
+            } catch (e: Exception) {
+                toast(e.message ?: "AI 分析失敗")
+            } finally {
+                upd { it.copy(stockAnalyzing = it.stockAnalyzing - t) }
+                aiEnd()
+            }
         }
     }
 

@@ -54,6 +54,9 @@ class Store(ctx: Context) {
     var autoTranslate: Boolean
         get() = sp.getBoolean("auto_tr", true)
         set(v) = sp.edit().putBoolean("auto_tr", v).apply()
+    var usWatch: List<String>
+        get() = str("usw", Us.defaultWatch.joinToString(",")).split(",").map { it.trim() }.filter { it.isNotBlank() }
+        set(v) = put("usw", v.distinct().joinToString(","))
     var watchlist: List<String>
         get() = str("watch", StockMap.defaultWatch.joinToString(",")).split(",").map { it.trim() }.filter { it.isNotBlank() }
         set(v) = put("watch", v.distinct().joinToString(","))

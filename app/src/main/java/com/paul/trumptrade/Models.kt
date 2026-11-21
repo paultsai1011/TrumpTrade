@@ -91,6 +91,8 @@ data class StockAnalysis(
     val time: Long,
     val chips: String = "",
     val tech: String = "",
+    val twImpact: String = "",
+    val twStocks: List<StockPick> = emptyList(),
 )
 
 // ---------- JSON helpers ----------
@@ -191,6 +193,8 @@ fun parseStockAnalysis(o: JSONObject): StockAnalysis = StockAnalysis(
     time = o.optLong("_t", System.currentTimeMillis()),
     chips = o.s("chips"),
     tech = o.s("tech"),
+    twImpact = o.s("tw_impact"),
+    twStocks = parsePicks(o.optJSONArray("tw_stocks")),
 )
 
 fun parseTranslation(o: JSONObject): Translation = Translation(

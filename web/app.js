@@ -1,5 +1,6 @@
 import { STOCK_NAMES, themeByName, themesOfStock, DEFAULT_WATCH, THEME_EN, EN_NAMES } from "./themes.js";
 import { analyze as techAnalyze, techSummary } from "./tech.js";
+import { US_LIST, US_MAP, isUs, DEFAULT_US } from "./us.js";
 
 // ================= 狀態 =================
 const LS = {
@@ -13,6 +14,8 @@ const S = {
   stack: [],                                  // 子頁面堆疊：{type:'news',id} | {type:'stock',code} | {type:'settings'}
   key: LS.get("key", ""),
   watch: LS.get("watch", DEFAULT_WATCH),
+  usWatch: LS.get("usw", DEFAULT_US),
+  us: null, usLoading: false,
   localTr: LS.get("tr", {}),
   analyses: LS.get("an", {}),
   stockAn: LS.get("san", {}),
@@ -516,6 +519,107 @@ function techHtml(code) {
   return h;
 }
 
+// ================= 美股 =================
+async function loadUs() {
+  if (S.us || S.usLoading) return;
+  S.usLoading = true;
+  try { const r = await fetch(`data/us.json?t=${Math.floor(Date.now() / 300000)}`); S.us = r.ok ? await r.json() : { quotes: {}, k: {} }; }
+  catch { S.us = { quotes: {}, k: {} }; }
+  S.usLoading = false; render();
+}
+const usName = t => { const x = US_MAP[t]; return x ? (S.en ? x.en : x.zh) : (S.us?.quotes?.[t]?.name || ""); };
+const usQ = t => S.us?.quotes?.[t] || null;
+function usTech(t) {
+  const raw = S.us?.k?.[t]; if (!raw) return null;
+  const k = { d: [...raw.d], o: [...raw.o], h: [...raw.h], l: [...raw.l], c: [...raw.c], v: [...raw.v] };
+  const q = usQ(t);
+  const qd = q?.date ? +q.date.replace(/-/g, "") : 0;
+  if (q && qd > k.d[k.d.length - 1] && q.op > 0) { k.d.push(qd); k.o.push(q.op); k.h.push(Math.max(q.hi, q.price)); k.l.push(Math.min(q.lo || q.price, q.price)); k.c.push(q.price); k.v.push(q.vol || 0); }
+  const key = "us" + t + k.d.length + k.c[k.c.length - 1];
+  return { k, t: techCache[key] || (techCache[key] = techAnalyze(k)) };
+}
+function usPriceHtml(t) {
+  const q = usQ(t);
+  if (!q) return `<div class="price flat">--</div>`;
+  const p = pct(q), c = cls(p);
+  return `<div class="price ${c}"><b>$${q.price.toFixed(2)}</b><br>${q.price - q.prev >= 0 ? "+" : ""}${(q.price - q.prev).toFixed(2)} (${p >= 0 ? "+" : ""}${p.toFixed(2)}%)</div>`;
+}
+function usNews(t) {
+  const x = US_MAP[t]; const words = [t, x?.en, x?.zh].filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`\\b(${words.join("|")})\\b`, "i");
+  return S.data.items.filter(it => re.test(it.title) || re.test(trOf(it)?.zh || "")).slice(0, 20);
+}
+function pageUs(t) {
+  if (!S.us) { loadUs(); return `<div class="sub">${T("美股資料載入中…", "Loading US data…")}</div>`; }
+  const q = usQ(t), x = US_MAP[t], sa = S.stockAn[t], inW = S.usWatch.includes(t);
+  let h = `<div class="row"><div class="grow"><div class="big">${esc(t)}</div><div class="sub">${esc(usName(t))}${q?.time ? " · " + esc(q.time) : ""}</div></div>${usPriceHtml(t)}</div>`;
+  if (q?.ext) h += `<div class="sub">${T("盤前／盤後", "Extended hours")}：$${q.ext.price.toFixed(2)} <span class="${cls(q.ext.chg)}">(${q.ext.chg >= 0 ? "+" : ""}${q.ext.chg.toFixed(2)}%)</span></div>`;
+  h += `<div class="row" style="margin:12px 0">
+      ${S.key ? `<button class="btn" data-act="usa" data-t="${esc(t)}" ${S.busy["s:" + t] ? "disabled" : ""}>${sa ? T("重新分析", "Re-analyze") : T("🤖 AI 分析＋台股連動", "🤖 AI analysis + Taiwan impact")}</button>` : ""}
+      <button class="btn ghost" data-act="uswatch" data-t="${esc(t)}">${inW ? T("移除自選", "Remove from watchlist") : T("加入自選", "Add to watchlist")}</button>
+      <a class="btn ghost" href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}" target="_blank" rel="noopener">Yahoo</a>
+      <button class="btn ghost" data-act="share-us" data-t="${esc(t)}">📤 ${T("分享", "Share")}</button>
+    </div>${progress("s:" + t)}`;
+  if (!q && !S.us.k?.[t]) h += `<div class="card sub">${T("這檔不在雲端美股清單裡，網頁版沒有資料（App 版可以查任何美股）。想加入清單可以跟我說。", "Not in the cloud US list, so the web has no data (the app can look up any ticker).")}</div>`;
+  if (x?.tw?.length) h += `<div class="card"><b>${T("🔗 台股連動（供應鏈／相關）", "🔗 Linked Taiwan stocks")}</b>${x.tw.map(c => `<div class="pick" data-stock="${c}"><div class="n">${esc(stockLabel(c, nameOf(c)))} <span class="sub">${c}</span></div>${priceHtml(c)}</div>`).join("")}</div>`;
+  const ut = usTech(t);
+  if (ut) {
+    const tt = ut.t;
+    h += `<div class="card"><div class="row"><b class="grow">${T("🕯️ K線與技術分析", "🕯️ Chart & technicals")}</b><span class="badge ${techCls(tt.status)} ${techCls(tt.status)}">${esc(techLabel(tt))}${tt.n >= 26 ? ` ${tt.score > 0 ? "+" : ""}${tt.score}` : ""}</span></div>`;
+    if (tt.n >= 26) {
+      h += candleSvg(ut.k, tt);
+      h += `<div class="sub" style="margin-top:8px">KD <span style="color:#ffc107">K ${tt.last.k.toFixed(1)}</span> <span style="color:#8ab4f8">D ${tt.last.d.toFixed(1)}</span></div>` +
+        lineSvg([{ arr: tt.series.K, col: "#ffc107" }, { arr: tt.series.D, col: "#8ab4f8" }], 60, { hi: 100, lo: 0, lines: [20, 80], h: 50 });
+      h += `<div class="sub" style="margin-top:6px">MACD ${T("柱狀體", "histogram")} ${tt.last.osc.toFixed(2)}　RSI ${tt.last.rsi?.toFixed(1) ?? "–"}</div>` + lineSvg([{ arr: tt.series.osc, bars: true }], 60, { h: 45 });
+      h += `<h3>${T("訊號", "Signals")}</h3>` + tt.reasons.map(r => `<div class="${r.dir > 0 ? "up" : r.dir < 0 ? "down" : "flat"}" style="font-size:13.5px;margin:3px 0">${r.dir > 0 ? "▲" : r.dir < 0 ? "▼" : "●"} ${esc(S.en ? r.en : r.zh)}</div>`).join("");
+    }
+    h += `</div>`;
+  }
+  if (sa) {
+    const list = (ti, arr) => arr?.length ? `<h3>${ti}</h3>` + arr.map(v => `<div>• ${esc(typeof v === "string" ? v : JSON.stringify(v))}</div>`).join("") : "";
+    h += `<div class="card"><div class="row"><b class="grow">${T("🤖 AI 建議", "🤖 AI view")}</b><span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span></div>
+      <div style="margin-top:6px">${esc(sa.summary || "")}</div>
+      ${sa.tech ? `<h3>${T("技術面", "Technicals")}</h3><div>${esc(sa.tech)}</div>` : ""}
+      ${sa.short_term ? `<h3>${T("短線（1~2週）", "Short term (1–2 weeks)")}</h3><div>${esc(sa.short_term)}</div>` : ""}${sa.mid_term ? `<h3>${T("中線（1~3個月）", "Mid term (1–3 months)")}</h3><div>${esc(sa.mid_term)}</div>` : ""}
+      ${sa.tw_impact ? `<h3>${T("🇹🇼 對台股的影響", "🇹🇼 Impact on Taiwan stocks")}</h3><div>${esc(sa.tw_impact)}</div>` : ""}
+      ${(sa.tw_stocks || []).length ? norm(sa.tw_stocks, "觀望").map(pickRow).join("") : ""}
+      ${list(T("理由", "Reasons"), sa.reasons)}${list(T("⚠️ 風險", "⚠️ Risks"), sa.risks)}${list(T("👀 接下來觀察", "👀 What to watch"), sa.catalysts)}
+      <div class="sub" style="margin-top:8px">${T("分析時間 ", "Analyzed ")}${full(sa.t)}</div></div>`;
+  }
+  h += DISC();
+  const rel = usNews(t);
+  if (rel.length) h += `<h2>${T("📰 相關新聞", "📰 Related news")}</h2>` + rel.map(newsCard).join("");
+  return h;
+}
+function analyzeUs(t) {
+  job("s:" + t, async () => {
+    const q = usQ(t), x = US_MAP[t], ut = usTech(t);
+    const prompt = `你是資深美股與台股分析師。請評估美股 ${t}（${x?.zh || usName(t)}）目前的操作建議，以及它對台灣股市（特別是台灣供應鏈）的連動影響。
+現在時間：${nowStr()}（台灣時間）
+${q ? `現價 $${q.price}（${pct(q).toFixed(2)}%），前收 $${q.prev}，資料時間 ${q.time}` : "報價暫無"}
+已知相關台股：${(x?.tw || []).map(c => c + " " + nameOf(c)).join("、") || "（無）"}
+${techSummary(ut?.t) || "技術面：（無資料）"}
+
+相關新聞：
+${usNews(t).slice(0, 15).map(it => `- [${fmt(it.time)}] ${(trOf(it)?.zh || it.title).slice(0, 180)}`).join("\n") || "（無）"}
+
+請同時考慮消息面與技術面。只輸出 JSON：
+{"action":"買進/賣出/觀望","confidence":0~100,"summary":"2~3句總結","tech":"技術面解讀1~2句","short_term":"短線(1~2週)看法","mid_term":"中線(1~3個月)看法","reasons":["理由"],"risks":["風險"],"catalysts":["接下來要觀察的事件"],"tw_impact":"對台股與台灣供應鏈的影響","tw_stocks":[{"code":"2330","name":"台積電","action":"買進/賣出/觀望","confidence":0~100,"reason":""}]}
+tw_stocks 列 0~5 檔受連動最明顯的台股。${RULE}${langRule()}`;
+    const o = await ask(prompt);
+    S.stockAn[t] = { ...o, t: Date.now(), name: usName(t) };
+    pruneSave("san", S.stockAn, 150);
+  });
+}
+function shareUsText(t) {
+  const q = usQ(t), x = US_MAP[t], sa = S.stockAn[t], ut = usTech(t);
+  let s2 = `🇺🇸 ${t} ${usName(t)}${q ? ` $${q.price.toFixed(2)}（${pct(q) >= 0 ? "+" : ""}${pct(q).toFixed(2)}%）` : ""}\n`;
+  if (ut && ut.t.n >= 26) s2 += `${T("技術面：", "Technicals: ")}${techLabel(ut.t)}（${ut.t.reasons.filter(r => r.dir).slice(0, 3).map(r => S.en ? r.en : r.zh).join(S.en ? "; " : "；")}）\n`;
+  if (x?.tw?.length) s2 += `${T("台股連動：", "Linked Taiwan stocks: ")}${x.tw.map(c => `${stockLabel(c, nameOf(c))}${c}${qtxt(c)}`).join(S.en ? ", " : "、")}\n`;
+  if (sa) s2 += `\n🤖 ${T("AI 建議：", "AI view: ")}${term(sa.action)} ${sa.confidence ?? ""}%\n${sa.summary || ""}\n${sa.tw_impact ? T("對台股：", "Taiwan impact: ") + sa.tw_impact + "\n" : ""}`;
+  return s2 + shareFooter();
+}
+
 // ================= 分享 =================
 const SITE = "https://paultsai1011.github.io/TrumpTrade/";
 const shareFooter = () => "\n" + T("⚠️ AI 自動分析，僅供參考，不構成投資建議", "⚠️ AI-generated, for reference only, not investment advice") + "\n👉 " + T("川普財經雷達", "Trump Market Radar") + " " + SITE;
@@ -669,6 +773,20 @@ function pageStocks() {
       ${sa ? `<span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span>` : ""}
       <button class="icon" data-del="${esc(c)}" style="font-size:16px" aria-label="${T("移除", "Remove")}">✕</button></div></div>`;
   }).join("") || `<div class="sub">${T("還沒有自選股", "No stocks yet")}</div>`;
+  // 美股自選
+  if (!S.us) loadUs();
+  h += `<h2>${T("🇺🇸 美股自選", "🇺🇸 US watchlist")}</h2>
+    <div class="row"><input type="text" id="addus" list="uslist" autocapitalize="characters" placeholder="${T("加入美股代號，例如 NVDA", "Add a US ticker, e.g. NVDA")}" style="flex:1">
+    <button class="btn" data-act="addus">${T("加入", "Add")}</button></div>
+    <datalist id="uslist">${US_LIST.map(x => `<option value="${x.t}">${esc(S.en ? x.en : x.zh)}</option>`).join("")}</datalist>`;
+  h += S.usWatch.map(t => {
+    const ut = usTech(t), sa = S.stockAn[t];
+    const tb = ut && ut.t.n >= 26 ? `<span class="badge ${techCls(ut.t.status)} ${techCls(ut.t.status)}" style="margin-left:6px;font-size:11px">🕯️ ${esc(techLabel(ut.t))}</span>` : "";
+    return `<div class="card click" data-us="${esc(t)}"><div class="row"><div class="grow"><b>${esc(t)}</b> <span class="sub">${esc(usName(t))}</span>${tb}
+      ${sa ? `<div class="sub" style="margin-top:2px">${esc(sa.summary || "")}</div>` : ""}</div>${usPriceHtml(t)}
+      ${sa ? `<span class="badge ${actCls(sa.action)} ${actCls(sa.action)}">${esc(term(sa.action))} ${sa.confidence ?? ""}%</span>` : ""}
+      <button class="icon" data-delus="${esc(t)}" style="font-size:16px" aria-label="${T("移除", "Remove")}">✕</button></div></div>`;
+  }).join("") || `<div class="sub">${T("還沒有美股自選", "No US stocks yet")}</div>`;
   const cutoff = Date.now() - 3 * 86400_000, men = {};
   for (const it of S.data.items) {
     if (it.time && it.time < cutoff) continue;
@@ -765,7 +883,7 @@ function render(scrollTop) {
   const cur = current();
   const titles = { home: T("川普財經雷達", "Trump Market Radar"), TRUMP: T("川普", "Trump"), NEWS: T("財經", "Markets"), POLICY: T("政策法案", "Policy"), stocks: T("台股", "TW Stocks") };
   applyLangChrome();
-  $("#title").textContent = cur ? ({ news: T("消息分析", "Analysis"), stock: T("個股分析", "Stock analysis"), settings: T("設定", "Settings") }[cur.type]) : titles[S.tab];
+  $("#title").textContent = cur ? ({ news: T("消息分析", "Analysis"), stock: T("個股分析", "Stock analysis"), us: T("美股分析", "US stock"), settings: T("設定", "Settings") }[cur.type]) : titles[S.tab];
   $("#back").classList.toggle("hidden", !cur);
   $("#reload").classList.toggle("hidden", !!cur);
   $("#gear").classList.toggle("hidden", !!cur);
@@ -776,6 +894,7 @@ function render(scrollTop) {
   let html;
   if (cur?.type === "news") html = pageNews(cur.id);
   else if (cur?.type === "stock") html = pageStock(cur.code);
+  else if (cur?.type === "us") html = pageUs(cur.t);
   else if (cur?.type === "settings") html = pageSettings();
   else if (S.tab === "home") html = pageHome();
   else if (S.tab === "stocks") html = pageStocks();
@@ -788,16 +907,28 @@ function render(scrollTop) {
 function setLang(en) { S.en = en; LS.set("en", en); render(); }
 
 document.addEventListener("click", e => {
-  const el = e.target.closest("[data-stock],[data-news],[data-act],[data-tab],[data-del],[data-kind],[data-lang]");
+  const el = e.target.closest("[data-stock],[data-news],[data-act],[data-tab],[data-del],[data-kind],[data-lang],[data-us],[data-delus]");
   if (!el) return;
   if (el.dataset.lang) return setLang(el.dataset.lang === "en");
   if (el.dataset.kind) { S.kind = el.dataset.kind; return render(); }
+  if (el.dataset.delus) { e.stopPropagation(); S.usWatch = S.usWatch.filter(c => c !== el.dataset.delus); LS.set("usw", S.usWatch); return render(); }
+  if (el.dataset.us) { lastScroll[S.tab] = window.scrollY; return push({ type: "us", t: el.dataset.us }); }
   if (el.dataset.del) { e.stopPropagation(); S.watch = S.watch.filter(c => c !== el.dataset.del); LS.set("watch", S.watch); return render(); }
   if (el.dataset.tab) { lastScroll[S.tab] = window.scrollY; S.tab = el.dataset.tab; S.stack = []; return render(true); }
   if (el.dataset.stock) { e.stopPropagation(); lastScroll[S.tab] = window.scrollY; return push({ type: "stock", code: el.dataset.stock }); }
   if (el.dataset.news) { lastScroll[S.tab] = window.scrollY; return push({ type: "news", id: el.dataset.news }); }
   const act = el.dataset.act;
-  if (act === "share-brief") doShare(shareBriefText());
+  if (act === "share-us") doShare(shareUsText(el.dataset.t));
+  else if (act === "usa") analyzeUs(el.dataset.t);
+  else if (act === "uswatch") { const t = el.dataset.t; S.usWatch = S.usWatch.includes(t) ? S.usWatch.filter(x => x !== t) : [...S.usWatch, t]; LS.set("usw", S.usWatch); render(); }
+  else if (act === "addus") {
+    const t = ($("#addus").value || "").trim().toUpperCase();
+    if (!isUs(t)) return toast(T("請輸入美股代號，例如 NVDA", "Enter a US ticker, e.g. NVDA"));
+    if (!S.usWatch.includes(t)) S.usWatch.push(t); LS.set("usw", S.usWatch);
+    if (!US_MAP[t]) toast(T("這檔不在雲端清單，網頁版可能沒有資料（App 版可以查）", "Not in the cloud list; the web may have no data (the app can)"));
+    render();
+  }
+  else if (act === "share-brief") doShare(shareBriefText());
   else if (act === "share-news") doShare(shareNewsText(el.dataset.id));
   else if (act === "share-stock") doShare(shareStockText(el.dataset.code));
   else if (act === "brief") makeBrief();
